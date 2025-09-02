@@ -1,3 +1,9 @@
+Methodology
+1. 为什么不vector_add:因为不只有这种程序段，所以还是保持普通运算指令的指令样式
+2. 
+
+
+---
 指令：
 cfg i: i_id
 cfg stream: i_id, FIFO_id 
@@ -10,23 +16,19 @@ iCntMap：i_id -> itercnt
 
 
 cfg i：
-* 预译码 -> get i_id 
-* 译码 -> iCntMap[i_id] = 0 
+* 预译码 -> iCntMap[i_id] = 0 
 
 cfg stream
-* 预译码 -> get i_id + FIFO_id
-* 译码 -> streamMap[FIFO_id] = i_id
+* 预译码 -> streamMap[FIFO_id] = i_id
 * Exe: Definition，State，ReadyMap
 
 step i：
-* 预译码 -> get id
-* 译码 -> iCntMap[i_id] ++
+* 预译码 -> iCntMap[i_id] ++
 
 cal:
-* 预译码 -> get FIFO_id
-* 译码 -> i_id = streamMap[FIFO_id] 
-* DP -> itercnt = iCntMap[i_id]  【TODO此处有数据相关，假设后续这里阻塞，有可能会读出错的iter】
-* 发射 -> FIFO[FIFO_id][itercnt] ready?
+* 预译码 -> i_id = streamMap[FIFO_id] 【TODO这里也可以让instCode直接携带i_id号】
+* 译码 -> itercnt = iCntMap[i_id]  【TODO此处有数据相关，假设后续这里阻塞，有可能会读出错的iter】
+* 发射 -> readyMap[FIFO_id][itercnt] ready?
 * 读寄存器 -> op = FIFO[FIFO_id][itercnt]
 * Exe
 
