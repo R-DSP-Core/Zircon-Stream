@@ -153,3 +153,4 @@ class BTBMini extends Module {
     // jumpCandidate: the jump candidate of the target, MUST be a one-hot vector
     io.gs.jumpCandidate := ((phtBit.asUInt >> bank(rIdx)) & io.fc.rValid.asUInt).asBools
 
+}
