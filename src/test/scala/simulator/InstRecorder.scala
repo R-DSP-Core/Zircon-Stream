@@ -1,7 +1,7 @@
 
-case class InstNum(alu: Int, branch: Int, load: Int, store: Int, mul: Int, div: Int)
+case class InstNum(alu: Int, branch: Int, load: Int, store: Int, mul: Int, div: Int, stream: Int)
 class InstRecorder {
-    private var instNum = InstNum(0, 0, 0, 0, 0, 0)
+    private var instNum = InstNum(0, 0, 0, 0, 0, 0, 0)
 
     def addALUInsts(insts: Int): Unit = {
         instNum = instNum.copy(alu = instNum.alu + insts)
@@ -23,5 +23,8 @@ class InstRecorder {
     }
     def getInstNum(): InstNum = {
         instNum
+    }
+    def addStreamInsts(insts: Int): Unit = {
+        instNum = instNum.copy(stream = instNum.stream + insts)
     }
 }
