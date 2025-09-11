@@ -171,10 +171,17 @@ class InstDecoder(rf: LogicRegFile, mem: Memory, fetch: Fetch, ir: InstRecorder)
         rf.write(rd, result)
     }
     private def executeStreamType(instruction: UInt): Unit = {
+        val rs1     = Bits(instruction, 19, 15)
+        val rs2     = Bits(instruction, 24, 20)
+        val op      = Bits(instruction, 14, 12)
+        val value1 = rf.read(rs1)
+        val value2 = rf.read(rs2)
         val pc      = fetch.getPC()
         ir.addStreamInsts(1)
         fetch.setPC(pc + UInt(4))
-        println("hello stream")
+
+        println(f"debug stream | op=$op| value2=$value2")
+
     }
     def decodeAndExecute(instruction: UInt): Unit = {
         val opcode = Bits(instruction, 6, 0)
