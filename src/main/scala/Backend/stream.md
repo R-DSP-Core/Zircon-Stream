@@ -12,9 +12,9 @@
    目前仅实现 `iter流`->`访存流`的依赖关系，即A[i]的线性访问模式
 
 4. 流的配置：
-   1. `iter流`配置指令：cfg_i i_id(rs1)：用于初始化iCntMap[i_id]=0；
+   1. `iter流`配置指令：cfg_i i_id(rs1), FIFO_id(rs2)：用于初始化iCntMap[i_id]=0 streamMap[FIFO_id] = i_id；
    2. `stream流`配置指令
-      1. 配置对应的`iter`流：cfg_stream: i_id(rs1), FIFO_id(rs2)：streamMap[FIFO_id] = i_id
+      1. 配置对应的`iter`流：cfg_stream: addr(rs1), FIFO_id(rs2)：addrCfg[FIFO_id] = addr 
       2. 配置访存首地址：cfg_addr: addr(rs1), FIFO_id(rs2) 
       3. ...
 
