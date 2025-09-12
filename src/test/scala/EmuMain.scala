@@ -26,7 +26,7 @@ class EmuMain extends AnyFlatSpec with ChiselScalatestTester {
         .withAnnotations(Seq(
             CachingAnnotation,
             VerilatorBackendAnnotation, 
-            // WriteFstAnnotation,
+            WriteFstAnnotation,
             TargetDirAnnotation(relativeTestDir),
             VerilatorFlags(Seq(
                 "-j", "16", 

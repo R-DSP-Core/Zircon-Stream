@@ -63,7 +63,7 @@ class Emulator{
             return false
         }
         for(i <- 0 until step){
-            simulator.step(1)
+            simulator.step(1,statistic.getTotalCycles())
         }
         if(!difftestRF(rdIdx, rdDataDut, pcDut)){
             return false

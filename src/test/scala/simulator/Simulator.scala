@@ -20,7 +20,7 @@ class Simulator {
     }
 
     // step the program
-    def step(num: Int = 1): Int = {
+    def step(num: Int = 1, curCycle: Int = 0 ): Int = {
         for (_ <- 0 until num) {
             val instruction = fetch.fetch()
             iring.push((fetch.getPC(), instruction))
@@ -28,8 +28,7 @@ class Simulator {
             if (simEnd(instruction)) {
                 return (if(rf(10) == UInt(0)) 0 else -1)
             }
-            decoder.decodeAndExecute(instruction)
-            
+            decoder.decodeAndExecute(instruction,curCycle)
         }
         return 1
     }

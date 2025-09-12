@@ -170,7 +170,13 @@ class InstDecoder(rf: LogicRegFile, mem: Memory, fetch: Fetch, ir: InstRecorder)
         }
         rf.write(rd, result)
     }
-    private def executeStreamType(instruction: UInt): Unit = {
+    private def executeStreamType(instruction: UInt, funct3: UInt,curCycle: Int): Unit = {
+        val CFGI = 0
+        val CFGSTORE = 1
+        val CFGLOAD = 5
+        val CALSTREAM = 2
+        val STEPI = 3
+
         val rs1     = Bits(instruction, 19, 15)
         val rs2     = Bits(instruction, 24, 20)
         val op      = Bits(instruction, 14, 12)
@@ -180,15 +186,49 @@ class InstDecoder(rf: LogicRegFile, mem: Memory, fetch: Fetch, ir: InstRecorder)
         ir.addStreamInsts(1)
         fetch.setPC(pc + UInt(4))
 
-        println(f"debug stream | op=$op| value2=$value2")
+        val instName = funct3.toInt match {
+            case CFGI => "cfg_i"
+            case CFGSTORE => "cfg_store"
+            case CALSTREAM => "cal_stream"
+            case STEPI => "step_i"
+            case CFGLOAD => "cfg_load"
+            case _ => "UNKNOWN"
+        }
+                
+        val fifo_id0 =  (value1.toInt >> 2) & 0x3
+        val fifo_id1 =  value2.toInt & 0x3
 
+        funct3.toInt match {
+            case CFGI => {
+                println(f"cycle = ${curCycle}  | $instName, i_id=$value1, fifo_id=$value2")
+            }
+            case CFGSTORE => {
+                println(f"cycle = ${curCycle}  | $instName, addr=0x${value1.toLong}%X, fifo_id=$value2")
+            }
+            case CFGLOAD => {
+                println(f"cycle = ${curCycle}  | $instName, addr=0x${value1.toLong}%X, fifo_id=$value2")
+            }
+            case STEPI => {
+                println(f"cycle = ${curCycle}  | $instName, i_id=$value1")
+            }
+            case CALSTREAM => {
+                println(f"cycle = ${curCycle}  | $instName, fifo_id_src0=$fifo_id0, fifo_id_src1=$fifo_id1, fifo_id_dest=$value2")
+            }
+            // case 0x5 => { 
+            //     for (i <- 0 until 16){
+            //         val addr = value1 + UInt(i*4)
+            //         val data = mem.read(addr,4)
+            //         println(f"cycle = ${curCycle}  | load from addr = 0x${addr.toLong}%X | data = $data")}
+            //     }
+            // case other => { println(f"cycle = ${curCycle}  | inst = $instName | src1=$value1 | src2=$value2")}
+        }
     }
-    def decodeAndExecute(instruction: UInt): Unit = {
+    def decodeAndExecute(instruction: UInt,curCycle: Int): Unit = {
         val opcode = Bits(instruction, 6, 0)
         val funct3 = Bits(instruction, 14, 12)
         val funct7 = Bits(instruction, 31, 25)
         opcode.toInt match {
-            case 0x0b => { executeStreamType(instruction)}
+            case 0x0b => { executeStreamType(instruction,funct3,curCycle)}
             case 0x37 => { executeUType(instruction) }
             case 0x17 => { executeUType(instruction) }
             case 0x6F => { executeJType(instruction) }
