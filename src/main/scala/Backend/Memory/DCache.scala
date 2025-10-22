@@ -257,7 +257,7 @@ class DCache extends Module {
         sb.io.deq.valid,
         sb.io.deqIdx
     )
-    sb.io.deq.ready := !io.l2.miss && !io.l2.rreq
+    sb.io.deq.ready := !io.l2.miss && !io.l2.rreq && !fsm.io.cc.sbLock
 
     // stage 2
     val c2s2    = ShiftRegister(c2s1, 1, 0.U.asTypeOf(new DChannel2Stage1Signal), !io.l2.miss && !io.l2.rreq)
