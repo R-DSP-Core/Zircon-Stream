@@ -61,7 +61,8 @@ class MulDivPipeline extends Module {
     }
     instPkgIs.prjLpv := io.iq.instPkg.bits.prjLpv << 1
     instPkgIs.prkLpv := io.iq.instPkg.bits.prkLpv << 1
-
+    instPkgIs.cycles.readOp := cycleReg
+    
     /* Regfile Stage */
     val instPkgRFReplay = WireDefault(false.B)
     val instPkgRF = WireDefault(ShiftRegister(
@@ -75,7 +76,7 @@ class MulDivPipeline extends Module {
     io.rf.rd.prk    := instPkgRF.prk
     instPkgRF.src1  := io.rf.rd.prjData
     instPkgRF.src2  := io.rf.rd.prkData
-    instPkgRF.rfCycle := cycleReg  // for profiling
+    instPkgRF.cycles.exe := cycleReg  // for profiling
     /* Execute Stage 1 */
     val instPkgEX1 = WireDefault(ShiftRegister(
         Mux(segFlush(instPkgRF), 0.U.asTypeOf(new BackendPackage), instPkgRF), 
@@ -110,7 +111,7 @@ class MulDivPipeline extends Module {
     io.fwd.src1Fwd.ready := DontCare
     io.fwd.src2Fwd.ready := DontCare
 
-    instPkgEX1.d2Cycle := cycleReg
+    instPkgEX1.cycles.exe1 := cycleReg
     /* Execute Stage 2 */
     val instPkgEX2 = WireDefault(ShiftRegister(
         Mux(io.cmt.flush, 0.U.asTypeOf(new BackendPackage), instPkgEX1), 
@@ -118,7 +119,7 @@ class MulDivPipeline extends Module {
         0.U.asTypeOf(new BackendPackage), 
         io.cmt.flush || !(div.io.busy || streamBusy)
     ))
-
+    instPkgEX2.cycles.exe2 := cycleReg
     /* Execute Stage 3 */
     val instPkgEX3 = WireDefault(ShiftRegister(
         Mux(io.cmt.flush, 0.U.asTypeOf(new BackendPackage), instPkgEX2), 
@@ -130,7 +131,7 @@ class MulDivPipeline extends Module {
     instPkgEX3ForWakeup.prd := Mux(div.io.busy || streamBusy, 0.U, instPkgEX3.prd)
     io.wk.wakeEX3 := (new WakeupBusPkg)(instPkgEX3ForWakeup, 0.U.asTypeOf(new ReplayBusPkg))
     instPkgEX3.rfWdata := Mux(instPkgEX3.op(2), div.io.res, mul.io.res)
-
+    instPkgEX3.cycles.wb := cycleReg  
     /* Write Back Stage */
     val instPkgWB = WireDefault(ShiftRegister(
         Mux(io.cmt.flush || div.io.busy || streamBusy , 0.U.asTypeOf(new BackendPackage), instPkgEX3), 
@@ -138,12 +139,13 @@ class MulDivPipeline extends Module {
         0.U.asTypeOf(new BackendPackage), 
         true.B
     ))
+    instPkgWB.cycles.wbROB := cycleReg
     // rob
     io.cmt.rob.widx.offset := UIntToOH(instPkgWB.robIdx.offset)
     io.cmt.rob.widx.qidx   := UIntToOH(instPkgWB.robIdx.qidx)
     io.cmt.rob.widx.high   := DontCare
     io.cmt.rob.wen         := instPkgWB.valid
-    io.cmt.rob.wdata       := (new ROBEntry)(instPkgWB,cycleReg)
+    io.cmt.rob.wdata       := (new ROBEntry)(instPkgWB)
     // regfile
     io.rf.wr.prd       := instPkgWB.prd
     io.rf.wr.prdVld    := instPkgWB.rdVld

@@ -63,6 +63,7 @@ class LSPipeline extends Module {
     }
     instPkgIs.prjLpv := io.iq.instPkg.bits.prjLpv << 1
     instPkgIs.prkLpv := io.iq.instPkg.bits.prkLpv << 1
+    instPkgIs.cycles.readOp := cycleReg
     
     /* Regfile Stage */
     val instPkgRF = WireDefault(ShiftRegister(
@@ -90,7 +91,7 @@ class LSPipeline extends Module {
     dc.io.pp.wdata    := instPkgRF.src2
     dc.io.pp.vaddr    := instPkgRF.src1
 
-    instPkgRF.rfCycle := cycleReg  // for profiling
+    instPkgRF.cycles.exe := cycleReg  // for profiling
     /* DCache Stage 1 */
     val instPkgD1 = WireDefault(ShiftRegister(
         Mux(io.cmt.flush, 0.U.asTypeOf(new BackendPackage), instPkgRF), 
@@ -106,7 +107,7 @@ class LSPipeline extends Module {
     dc.io.mmu.uncache   := instPkgD1.src1(31, 28) === 0xa.U
     dc.io.mmu.exception := 0.U(8.W)
     dc.io.l2            <> io.mem.l2
-    instPkgD1.d2Cycle := cycleReg  // for profiling
+    instPkgD1.cycles.exe1 := cycleReg  // for profiling
     /* DCache Stage 2 */
     val instPkgD2 = WireDefault(ShiftRegister(
         Mux(segFlush(instPkgD1), 0.U.asTypeOf(new BackendPackage), instPkgD1), 
@@ -116,7 +117,7 @@ class LSPipeline extends Module {
     ))
 
     instPkgD2.nxtCmtEn := !instPkgD2.op(6)
-
+    instPkgD2.cycles.wb := cycleReg
     // replay
     io.wk.rplyOut.prd    := instPkgD2.prd
     io.wk.rplyOut.replay := (dc.io.pp.miss || dc.io.pp.loadReplay || dc.io.pp.sbFull) && instPkgD2.valid
@@ -129,12 +130,13 @@ class LSPipeline extends Module {
         true.B
     ))
     instPkgWB.rfWdata  := dc.io.pp.rdata
+    instPkgWB.cycles.wbROB := cycleReg
     // rob
     io.cmt.rob.widx.offset := UIntToOH(instPkgWB.robIdx.offset)
     io.cmt.rob.widx.qidx   := UIntToOH(instPkgWB.robIdx.qidx)
     io.cmt.rob.widx.high   := DontCare
     io.cmt.rob.wen         := instPkgWB.valid
-    io.cmt.rob.wdata       := (new ROBEntry)(instPkgWB,cycleReg) 
+    io.cmt.rob.wdata       := (new ROBEntry)(instPkgWB) 
     // regfile
     io.rf.wr.prd       := instPkgWB.prd
     io.rf.wr.prdVld    := instPkgWB.rdVld

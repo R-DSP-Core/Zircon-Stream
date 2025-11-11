@@ -115,7 +115,6 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
     val iq = RegInit(
         VecInit.fill(n)(VecInit.fill(len)(0.U.asTypeOf(new IQEntry(num))))
     )
-    
     val fList = Module(new ClusterIndexFIFO(
         UInt((log2Ceil(n)+log2Ceil(len)).W), num, dw, ew, 0, 0, true, 
         Some(Seq.tabulate(num)(i => ((i / len) << log2Ceil(len) | (i % len)).U((log2Ceil(n) + log2Ceil(len)).W)))

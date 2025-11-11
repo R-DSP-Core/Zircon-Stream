@@ -86,6 +86,7 @@ class ArithPipeline extends Module {
 
     // wakeup 
     io.wk.wakeIssue := (new WakeupBusPkg)(io.iq.instPkg.bits, io.wk.rplyIn)
+    instPkgIs.cycles.readOp := cycleReg
     
     /* Regfile Stage */
     val instPkgRF = WireDefault(ShiftRegister(
@@ -110,7 +111,7 @@ class ArithPipeline extends Module {
     instPkgRF.pc := io.cmt.rob.rdata.pc
     instPkgRF.predOffset := io.cmt.bdb.rdata.offset
 
-    instPkgRF.rfCycle := cycleReg  // for profiling
+    instPkgRF.cycles.exe := cycleReg  // for profiling
     // wakeup
     io.wk.wakeRF := (new WakeupBusPkg)(instPkgRF, io.wk.rplyIn)
     
@@ -146,7 +147,7 @@ class ArithPipeline extends Module {
     io.fwd.src1Fwd.ready := DontCare
     io.fwd.src2Fwd.ready := DontCare 
 
-    instPkgEX.d2Cycle := cycleReg
+    instPkgEX.cycles.wb := cycleReg
     /* Write Back Stage */
     val instPkgWB = WireDefault(ShiftRegister(
         Mux(io.cmt.flush, 0.U.asTypeOf(new BackendPackage), instPkgEX), 
@@ -154,12 +155,13 @@ class ArithPipeline extends Module {
         0.U.asTypeOf(new BackendPackage), 
         true.B
     ))
+    instPkgWB.cycles.wbROB := cycleReg
     // rob
     io.cmt.rob.widx.offset := UIntToOH(instPkgWB.robIdx.offset)
     io.cmt.rob.widx.qidx   := UIntToOH(instPkgWB.robIdx.qidx)
     io.cmt.rob.widx.high   := DontCare
     io.cmt.rob.wen         := instPkgWB.valid
-    io.cmt.rob.wdata       := (new ROBEntry)(instPkgWB,cycleReg)
+    io.cmt.rob.wdata       := (new ROBEntry)(instPkgWB)
 
     // bdb
     io.cmt.bdb.widx.offset := UIntToOH(instPkgWB.bdbIdx.offset)

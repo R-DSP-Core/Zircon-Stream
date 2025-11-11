@@ -45,10 +45,18 @@ class Frontend extends Module {
     val rnm = Module(new Rename)
     val dcd = VecInit.fill(ndcd)(Module(new Decoder).io)
     val pc  = RegInit(0x7FFFFFF0L.U(32.W))
-    
+
+    // cycle stat
+    val cycleReg = RegInit(0.U(64.W))
+    cycleReg     := cycleReg + 1.U
+
     /* Previous Fetch Stage */
     val instPkgPF   = WireDefault(VecInit.fill(nfch)(0.U.asTypeOf(new FrontendPackage)))
     val instPkgFCIn = WireDefault(instPkgPF)
+    for (i <- 0 until instPkgFCIn.length) {
+      instPkgFCIn(i).cycles.fetch := cycleReg
+    }
+
     // npc
     npc.io.cmt       := io.cmt.npc
     npc.io.pd        := pd.io.npc
@@ -86,6 +94,7 @@ class Frontend extends Module {
         pkg.predInfo.offset := Mux(pr.io.fc.gs.jumpEnPredict(i), Mux(pr.io.fc.btbM.predType(i) === RET, pr.io.fc.btbM.jumpTgt(i), BLevelPAdder32(pr.io.fc.btbM.jumpTgt(i), ~pcs(i), 1.U).io.res), 4.U)
         pkg.predInfo.vld    := instPkgFC(i).valid && pr.io.fc.btbM.rValid(i)
         pkg.predInfo.pcPlus4 := pcsPlus4(i)
+        pkg.cycles.preDecode := cycleReg
         pkg.valid           := instPkgFC(i).valid && pr.io.fc.validMask(i)
     }
 
@@ -124,6 +133,9 @@ class Frontend extends Module {
         enq.bits  := instPkgFQIn(i)
     }
     fq.io.cmt := io.cmt.fq
+    for (i <- 0 until instPkgFQIn.length) {
+      instPkgFQIn(i).cycles.decode := cycleReg
+    }
 
     /* Decode and Rename Stage */
     val instPkgDCD = WireDefault(VecInit(fq.io.deq.map(_.bits)))
@@ -145,7 +157,10 @@ class Frontend extends Module {
         pkg.op      := dcd.op
         pkg.imm     := dcd.imm
         pkg.func    := dcd.func
-        pkg.sinfo   := dcd.sinfo
+        pkg.sinfo   := dcd.sinfo``
+    }
+    for (i <- 0 until instPkgDSPIn.length) {
+      instPkgDSPIn(i).cycles.dispatch := cycleReg
     }
     // io.bke.rf.pra := rnm.io.fte.pra
     val instPkgDSP = WireDefault(ShiftRegister(

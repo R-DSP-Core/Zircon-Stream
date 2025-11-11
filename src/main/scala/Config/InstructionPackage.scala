@@ -23,6 +23,9 @@ class FrontendPackage extends Bundle {
     val rinfo      = new RegisterInfo()
     val pinfo      = new PRegisterInfo()
     val sinfo      = new StreamInfo()
+
+    //for profiling
+    val cycles = new cycleStat()
 }
 
 class BackendPackage extends Bundle {
@@ -57,8 +60,7 @@ class BackendPackage extends Bundle {
     val sinfo      = new StreamInfo()
 
     //for profiling
-    val rfCycle = UInt(64.W)
-    val d2Cycle = UInt(64.W)
+    val cycles = new cycleStat()
     
     def apply(fte: FrontendPackage, robIdx: ClusterEntry, bdbIdx: ClusterEntry, prjInfo: ReadyBoardEntry, prkInfo: ReadyBoardEntry): BackendPackage = {
         val bke = WireDefault(0.U.asTypeOf(new BackendPackage))
@@ -71,6 +73,7 @@ class BackendPackage extends Bundle {
         bke.op         := fte.op(6, 0)
         bke.imm        := fte.imm
         bke.sinfo      := fte.sinfo
+        bke.cycles     := fte.cycles
         bke.robIdx     := robIdx
         bke.bdbIdx     := bdbIdx
         bke.prjWk      := prjInfo.ready && fte.pinfo.prjWk
