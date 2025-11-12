@@ -17,6 +17,7 @@ class DecoderIO extends Bundle{
     val imm     = Output(UInt(32.W))
     val func    = Output(UInt(niq.W))
     val sinfo  = Output(new StreamInfo())
+    val isCalStream = Output(Bool())
 }
 
 class Decoder extends Module{
@@ -39,6 +40,8 @@ class Decoder extends Module{
     val isMem        = isLoad || isStore
     val isMuldiv     = inst(6, 0) === 0x33.U && funct7(0) === 1.U
     val isStream     = inst(6,0) === 0x0b.U
+    val isCalStream  = isStream && funct3 === CALSTREAM
+    val isCfgStream  = isStream && !isCalStream
 
     /* op: 
         bit6: indicates src1 source, 0-reg 1-pc, or indicates store, 1-store, 0-not
@@ -55,7 +58,8 @@ class Decoder extends Module{
         isJalr        -> JALR(3, 0),
         isJal         -> JAL(3, 0),
         isBr          -> 1.U(1.W) ## funct3,
-        isMem         -> isAtom ## funct3
+        isMem         -> isAtom ## funct3,
+        isCalStream   -> 0.U
     ))
     io.op := op_6 ## op_5 ## op_4 ## op_3_0
 
@@ -76,9 +80,11 @@ class Decoder extends Module{
     ))
     io.imm := imm
 
-    io.func := isMem ## (isMuldiv || isPriv || isStream) ## !(isMem || isMuldiv || isPriv)
+    io.func := isMem ## (isMuldiv || isPriv || isCfgStream) ## !(isMem || isMuldiv || isPriv || isCfgStream)
 
     io.sinfo.op := funct3(stInstBits-1,0)
     io.sinfo.state(DONECFG) := isStream
     io.sinfo.state(LDSTRAEM) := funct3(stInstBits)
+
+    io.isCalStream := isCalStream
 }

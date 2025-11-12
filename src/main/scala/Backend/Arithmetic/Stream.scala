@@ -5,7 +5,23 @@ import ZirconConfig.Cache._
 import ZirconConfig.EXEOp._
 import ZirconConfig.FifoRole._
 
+class SERFIO extends Bundle {
+    val iterCnt = Input(UInt(32.W))
+    val rdata1 = Output(UInt(32.W))
+    val rdata2 = Output(UInt(32.W))
+}
 
+class SEWBIO extends Bundle {
+    val wvalid = Input(Bool())
+    val iterCnt = Input(UInt(32.W))
+    val wdata  = Input(UInt(32.W))
+}
+
+class SEISIO extends Bundle {
+    val isCalStream = Input(Vec(12,Bool()))
+    val iterCnt = Input(Vec(12,UInt(32.W)))
+    val ready  = Output(Vec(12, Bool()))
+}
 
 class SEPipelineIO extends Bundle {
     val op      = Input(UInt(stInstBits.W))
@@ -18,10 +34,12 @@ class SEPipelineIO extends Bundle {
 
 
 class StreamEngineIO extends Bundle {
+    val rf = Vec(3, new SERFIO)
+    val wb = Vec(3, new SEWBIO)
+    val is = new SEISIO
     val pp  = new SEPipelineIO
     val mem = new MemIO(false)
 }
-
 
 class StreamEngine extends Module {
     val io = IO(new StreamEngineIO)
@@ -75,6 +93,18 @@ class StreamEngine extends Module {
         addrCfg(fifoId(Dst)) := addr 
         addrDyn(fifoId(Dst)) := addr 
         stateCfg(fifoId(Dst)) := ppBits.cfgState
+    }
+
+    for(i <- 0 until 3){
+        io.rf(i).rdata1 := Fifo(0)(io.rf(i).iterCnt)
+        io.rf(i).rdata2 := Fifo(1)(io.rf(i).iterCnt)
+        when(io.wb(i).wvalid){
+            Fifo(2)(io.wb(i).iterCnt) := res
+        }
+    }
+
+    for (i <- 0 until 12) {
+        io.is.ready(i) :=  io.is.isCalStream(i) & readyMap(0)(io.is.iterCnt(i)) & readyMap(1)(io.is.iterCnt(i))
     }
 
     //calculate

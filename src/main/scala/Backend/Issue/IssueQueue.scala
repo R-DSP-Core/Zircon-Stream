@@ -41,15 +41,23 @@ class IQEntry(num: Int) extends Bundle {
         e
     }
 
-    def stateUpdate(wakeBus: Vec[WakeupBusPkg], rplyBus: ReplayBusPkg, deqItem: Seq[DecoupledIO[BackendPackage]], isMem: Boolean): IQEntry = {
-        if(isMem){ val e = this.wakeup(wakeBus, rplyBus, deqItem, isMem).lpvUpdate(wakeBus, rplyBus); e}
-        else{ val e = this.wakeup(wakeBus, rplyBus, deqItem, isMem).lpvUpdate(wakeBus, rplyBus); e}
+    def stateUpdate(wakeBus: Vec[WakeupBusPkg], rplyBus: ReplayBusPkg, deqItem: Seq[DecoupledIO[BackendPackage]], isMem: Boolean, streamReady: Vec[Bool], flatIdx: UInt): IQEntry = {
+        if(isMem){ val e = this.wakeup(wakeBus, rplyBus, deqItem, isMem, streamReady, flatIdx).lpvUpdate(wakeBus, rplyBus); e}
+        else{ val e = this.wakeup(wakeBus, rplyBus, deqItem, isMem, streamReady, flatIdx).lpvUpdate(wakeBus, rplyBus); e}
     }
     
-    def wakeup(wakeBus: Vec[WakeupBusPkg], rplyBus: ReplayBusPkg, deqItem: Seq[DecoupledIO[BackendPackage]], isMem: Boolean): IQEntry = {
+    def wakeup(wakeBus: Vec[WakeupBusPkg], rplyBus: ReplayBusPkg, deqItem: Seq[DecoupledIO[BackendPackage]], isMem: Boolean, streamReady: Vec[Bool], flatIdx: UInt): IQEntry = {
         val e = WireDefault(this)
-        val prjWkNxt = Mux(this.item.prjLpv.orR && rplyBus.replay, false.B, this.item.prjWk || wakeBus.map(_.prd === this.item.prj).reduce(_ || _) || rplyBus.prd === this.item.prj)
-        val prkWkNxt = Mux(this.item.prkLpv.orR && rplyBus.replay, false.B, this.item.prkWk || wakeBus.map(_.prd === this.item.prk).reduce(_ || _) || rplyBus.prd === this.item.prk)
+        val prjWkNxt = Mux(
+            this.item.isCalStream, streamReady(flatIdx), Mux(                   
+            this.item.prjLpv.orR && rplyBus.replay, 
+            false.B, this.item.prjWk || wakeBus.map(_.prd === this.item.prj).reduce(_ || _) || rplyBus.prd === this.item.prj)
+        )
+        val prkWkNxt = Mux(
+            this.item.isCalStream, streamReady(flatIdx), Mux(                   
+            this.item.prkLpv.orR && rplyBus.replay, 
+            false.B, this.item.prkWk || wakeBus.map(_.prd === this.item.prk).reduce(_ || _) || rplyBus.prd === this.item.prk)
+        )
         val stBeforeNxt = if(isMem) this.stBefore - PopCount(deqItem.map{case s => s.valid && s.ready && Mux(this.item.op(6), true.B, s.bits.op(6))}) else this.stBefore
         e.stBefore := stBeforeNxt
         e.item.prjWk := prjWkNxt
@@ -93,6 +101,12 @@ class IssueQueueDBGIO extends Bundle {
     val fullCycle = UInt(64.W)
 }
 
+class IsSEIO extends Bundle {
+    val isCalStream = Output(Vec(12,Bool()))
+    val iterCnt = Output(Vec(12,UInt(32.W)))
+    val ready  = Input(Vec(12, Bool()))
+}
+
 class IssueQueueIO(ew: Int, dw: Int, num: Int) extends Bundle {
     val enq     = Vec(ew, Flipped(DecoupledIO(new BackendPackage)))
     val deq     = Vec(dw, DecoupledIO(new BackendPackage))
@@ -101,6 +115,7 @@ class IssueQueueIO(ew: Int, dw: Int, num: Int) extends Bundle {
     val stLeft  = Output(UInt(log2Ceil(num).W))
     val flush   = Input(Bool())
     val dbg     = Output(new IssueQueueDBGIO)
+    val se      = new IsSEIO
 }
 
 class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Module {
@@ -115,11 +130,12 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
     val iq = RegInit(
         VecInit.fill(n)(VecInit.fill(len)(0.U.asTypeOf(new IQEntry(num))))
     )
+    
     val fList = Module(new ClusterIndexFIFO(
         UInt((log2Ceil(n)+log2Ceil(len)).W), num, dw, ew, 0, 0, true, 
         Some(Seq.tabulate(num)(i => ((i / len) << log2Ceil(len) | (i % len)).U((log2Ceil(n) + log2Ceil(len)).W)))
     ))
-    
+
     fList.io.enq.foreach(_.valid := false.B) 
     fList.io.enq.foreach(_.bits := DontCare)
     fList.io.deq.foreach(_.ready := false.B)
@@ -152,19 +168,23 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
     fList.io.flush := false.B
 
     /* wake up */
-    iq.foreach{case (qq) =>
-        qq.foreach{case (e) =>
-            e := e.stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem)
+    iq.zipWithIndex.foreach { case (qq, i) =>      // i 是一维索引 (行号)
+        qq.zipWithIndex.foreach { case (e, j) =>      // j 是二维索引 (列号)
+            val flatIdx = i * iq(0).size + j
+            io.se.isCalStream(flatIdx) := e.item.isCalStream
+            io.se.iterCnt(flatIdx) := e.item.iterCnt
+            e := e.stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem, io.se.ready, flatIdx.U)
         }
-    }
+    } 
     /* write to iq */
     for (i <- 0 until ew){
         when(io.enq(i).valid && fList.io.deq(0).valid){
+            val flatIdx = freeIQ(i) * iq(0).size.U + freeItem(i)
             iq(freeIQ(i))(freeItem(i)) := (new IQEntry(len))(
                 enqEntries(i), 
                 if(isMem) Mux(enqEntries(i).op(6), memLeftNext(i), stLeftNext(i)) 
                 else 0.U
-            ).stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem)
+            ).stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem, io.se.ready, flatIdx)
         }
     }
 

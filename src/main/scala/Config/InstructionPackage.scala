@@ -26,6 +26,7 @@ class FrontendPackage extends Bundle {
 
     //for profiling
     val cycles = new cycleStat()
+    val isCalStream = Bool()
 }
 
 class BackendPackage extends Bundle {
@@ -58,11 +59,15 @@ class BackendPackage extends Bundle {
     val result     = UInt(32.W)
     val nxtCmtEn   = Bool()
     val sinfo      = new StreamInfo()
+    val isCalStream = Bool()
+    val iterCnt    = UInt(32.W)
 
     //for profiling
     val cycles = new cycleStat()
+    // for stream cal inst
+    val iter = UInt(32.W)
     
-    def apply(fte: FrontendPackage, robIdx: ClusterEntry, bdbIdx: ClusterEntry, prjInfo: ReadyBoardEntry, prkInfo: ReadyBoardEntry): BackendPackage = {
+    def apply(fte: FrontendPackage, robIdx: ClusterEntry, bdbIdx: ClusterEntry, prjInfo: ReadyBoardEntry, prkInfo: ReadyBoardEntry, iter: UInt): BackendPackage = {
         val bke = WireDefault(0.U.asTypeOf(new BackendPackage))
         bke.valid      := fte.valid
         bke.pc         := fte.pc
@@ -74,12 +79,14 @@ class BackendPackage extends Bundle {
         bke.imm        := fte.imm
         bke.sinfo      := fte.sinfo
         bke.cycles     := fte.cycles
+        bke.isCalStream:= fte.isCalStream
         bke.robIdx     := robIdx
         bke.bdbIdx     := bdbIdx
         bke.prjWk      := prjInfo.ready && fte.pinfo.prjWk
         bke.prkWk      := prkInfo.ready && fte.pinfo.prkWk
         bke.prjLpv     := prjInfo.lpv
         bke.prkLpv     := prkInfo.lpv
+        bke.iter       := iter
         bke
     }
 }

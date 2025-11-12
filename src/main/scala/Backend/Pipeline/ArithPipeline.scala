@@ -56,12 +56,26 @@ class ArithWakeupIO extends Bundle {
     val rplyIn    = Input(new ReplayBusPkg)
 }
 
+class ArithSERFIO extends Bundle {
+    val iterCnt = Output(UInt(32.W))
+    val rdata1 = Input(UInt(32.W))
+    val rdata2 = Input(UInt(32.W))
+}
+
+class ArithSEWBIO extends Bundle {
+    val wvalid = Output(Bool())
+    val iterCnt = Output(UInt(32.W))
+    val wdata  = Output(UInt(32.W))
+}
+
 class ArithPipelineIO extends Bundle {
     val iq  = new ArithIQIO
     val rf  = Flipped(new RegfileSingleIO)
     val cmt = new ArithCommitIO
     val fwd = new ArithForwardIO
     val wk  = new ArithWakeupIO
+    val serf = new ArithSERFIO
+    val sewb = new ArithSEWBIO
 }
 
 class ArithPipeline extends Module {
@@ -97,8 +111,9 @@ class ArithPipeline extends Module {
     ))
     io.rf.rd.prj   := instPkgRF.prj
     io.rf.rd.prk   := instPkgRF.prk
-    instPkgRF.src1 := io.rf.rd.prjData
-    instPkgRF.src2 := io.rf.rd.prkData
+    io.serf.iterCnt  := instPkgRF.iterCnt
+    instPkgRF.src1 := Mux(instPkgRF.isCalStream, io.serf.rdata1, io.rf.rd.prjData)
+    instPkgRF.src2 := Mux(instPkgRF.isCalStream, io.serf.rdata2, io.rf.rd.prkData)
 
     io.cmt.rob.ridx.offset := UIntToOH(instPkgRF.robIdx.offset)
     io.cmt.rob.ridx.qidx   := UIntToOH(instPkgRF.robIdx.qidx)
@@ -174,6 +189,14 @@ class ArithPipeline extends Module {
     io.rf.wr.prd       := instPkgWB.prd
     io.rf.wr.prdVld    := instPkgWB.rdVld
     io.rf.wr.prdData   := instPkgWB.rfWdata
+    class ArithSEWBIO extends Bundle {
+    val wvalid = Output(Bool())
+    val iterCnt = Output(UInt(32.W))
+    val wdata  = Output(UInt(32.W))
+}
+    io.sewb.wvalid  := instPkgWB.isCalStream
+    io.sewb.iterCnt := instPkgWB.iterCnt
+    io.sewb.wdata   :=  instPkgWB.rfWdata
     // forward
     io.fwd.instPkgWB   := instPkgWB
 }

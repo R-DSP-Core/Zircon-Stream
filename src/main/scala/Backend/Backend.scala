@@ -175,4 +175,14 @@ class Backend extends Module {
     io.dbg.lsIQ := lsIQ.io.dbg
     io.dbg.mdPP := mdPP.io.dbg
     io.dbg.lsPP := lsPP.io.dbg
+
+    //stream engine
+    val stream = Module(new StreamEngine)
+    arPP(0).serf <> stream.io.rf(0)
+    arPP(1).serf <> stream.io.rf(1)
+    arPP(2).serf <> stream.io.rf(2)
+    arPP(0).sewb <> stream.io.wb(0)
+    arPP(1).sewb <> stream.io.wb(1)
+    arPP(2).sewb <> stream.io.wb(2)
+    arIQ.io.se  <> stream.io.is
 }   
