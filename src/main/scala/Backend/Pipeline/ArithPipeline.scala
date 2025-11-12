@@ -189,11 +189,7 @@ class ArithPipeline extends Module {
     io.rf.wr.prd       := instPkgWB.prd
     io.rf.wr.prdVld    := instPkgWB.rdVld
     io.rf.wr.prdData   := instPkgWB.rfWdata
-    class ArithSEWBIO extends Bundle {
-    val wvalid = Output(Bool())
-    val iterCnt = Output(UInt(32.W))
-    val wdata  = Output(UInt(32.W))
-}
+
     io.sewb.wvalid  := instPkgWB.isCalStream
     io.sewb.iterCnt := instPkgWB.iterCnt
     io.sewb.wdata   :=  instPkgWB.rfWdata
