@@ -44,9 +44,13 @@ TODO：
 
 ## DEBUG
 
+TOOL
+1. 一些assert,print
+2. 模拟器
+3. IQ如何方便debug
+
+Q
 1. 接口能这么写吗
-2. IQ如何方便debug
-3. IQ进队的时候没有接上seio-可以看verilog中seio都连了什么
-4. 模拟器
-5. 接上muldiv 和 disp
+3. IQ进队的时候用的itercnt感觉是错误的，不应该简单的那样子直连
+   如果该slot上一个itercnt刚好对应ready而此时入队的inst的iter对应的不是ready，可能会导致错误
 6. 分支预测失误恢复：拷贝一个iterCnt commit时赋值，flush时恢复
