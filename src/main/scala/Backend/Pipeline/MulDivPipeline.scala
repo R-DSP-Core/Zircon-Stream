@@ -37,7 +37,7 @@ class MulDivPipelineIO extends Bundle {
     val fwd = new MulDivForwardIO
     val wk  = new MulDivWakeupIO
     val dbg = new MulDivDBGIO
-    val streamMem = new MemIO(false)
+    val streamPP  = Flipped(new SEPipelineIO)
 }
 
 class MulDivPipeline extends Module {
@@ -45,8 +45,7 @@ class MulDivPipeline extends Module {
 
     val mul = Module(new MulBooth2Wallce)
     val div = Module(new SRT2)
-    val stream = Module(new StreamEngine)
-    val streamBusy = stream.io.pp.busy
+    val streamBusy = io.streamPP.busy
 
     // cycle stat
     val cycleReg = RegInit(0.U(64.W))
@@ -97,14 +96,14 @@ class MulDivPipeline extends Module {
     div.io.op   := instPkgEX1.op(3, 0)
 
     // stream 
-    stream.io.pp.valid := instPkgEX1.sinfo.state(DONECFG)
-    val stBits = stream.io.pp
+    io.streamPP.valid := instPkgEX1.sinfo.state(DONECFG)
+    val stBits = io.streamPP
     val sInfo  = instPkgEX1.sinfo
     stBits.cfgState := sInfo.state
     stBits.op := sInfo.op
     stBits.src1 := Mux(io.fwd.src1Fwd.valid, io.fwd.src1Fwd.bits, instPkgEX1.src1)
     stBits.src2 := Mux(io.fwd.src2Fwd.valid, io.fwd.src2Fwd.bits, instPkgEX1.src2)
-    io.streamMem <> stream.io.mem
+
 
     // forward
     io.fwd.instPkgEX     := instPkgEX1

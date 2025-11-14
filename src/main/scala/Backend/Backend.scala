@@ -53,6 +53,7 @@ class BackendIO extends Bundle {
     val dsp = new BackendDispatchIO
     val cmt = new BackendCommitIO
     val mem = new BackendMemoryIO
+    val seRIter = Flipped(new SERdIterIO)
     val dbg = new BackendDBGIO
 }
 
@@ -163,7 +164,6 @@ class Backend extends Module {
     )
     rplyBus := lsPP.io.wk.rplyOut
     io.mem.l2 <> lsPP.io.mem.l2
-    io.mem.stream <> mdPP.io.streamMem
     io.dsp.wakeBus := wakeBus(0)
     io.dsp.rplyBus := rplyBus
 
@@ -178,11 +178,14 @@ class Backend extends Module {
 
     //stream engine
     val stream = Module(new StreamEngine)
+    io.seRIter <> stream.io.rdIter //dispatch
+    arIQ.io.se  <> stream.io.is //issue
     arPP(0).serf <> stream.io.rf(0)
     arPP(1).serf <> stream.io.rf(1)
     arPP(2).serf <> stream.io.rf(2)
     arPP(0).sewb <> stream.io.wb(0)
     arPP(1).sewb <> stream.io.wb(1)
     arPP(2).sewb <> stream.io.wb(2)
-    arIQ.io.se  <> stream.io.is
+    io.mem.stream <> stream.io.mem
+    mdPP.io.streamPP <> stream.io.pp //cfgstream
 }   

@@ -37,7 +37,7 @@ class StreamEngineIO extends Bundle {
     val rf = Vec(3, new SERFIO)
     val wb = Vec(3, new SEWBIO)
     val is = new SEISIO
-    val rdIter = new SERdIterIO
+    val rdIter = Flipped(new SERdIterIO)
     val pp  = new SEPipelineIO
     val mem = new MemIO(false)
 }
@@ -101,7 +101,7 @@ class StreamEngine extends Module {
         io.rf(i).rdata1 := Fifo(0)(io.rf(i).iterCnt)
         io.rf(i).rdata2 := Fifo(1)(io.rf(i).iterCnt)
         when(io.wb(i).wvalid){
-            Fifo(2)(io.wb(i).iterCnt) := res
+            Fifo(2)(io.wb(i).iterCnt) := io.wb(i).wdata
         }
     }
 

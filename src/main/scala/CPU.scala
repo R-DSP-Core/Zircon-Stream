@@ -32,6 +32,7 @@ class CPU(sim: Boolean = false) extends Module {
 
     fte.io.dsp <> dsp.io.fte
     dsp.io.bke <> bke.io.dsp
+    dsp.io.seRIter <> bke.io.seRIter
     // fte.io.bke <> bke.io.fte
     
     fte.io.cmt <> cmt.io.fte
