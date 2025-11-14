@@ -188,4 +188,8 @@ class Backend extends Module {
     arPP(2).sewb <> stream.io.wb(2)
     io.mem.stream <> stream.io.mem
     mdPP.io.streamPP <> stream.io.pp //cfgstream
+
+    //Dontcare
+    lsIQ.io.se.ready := VecInit.fill(12)(true.B)
+    mdIQ.io.se.ready := VecInit.fill(12)(true.B)
 }   

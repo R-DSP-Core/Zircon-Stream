@@ -120,6 +120,7 @@ class IssueQueueIO(ew: Int, dw: Int, num: Int) extends Bundle {
 
 class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Module {
     val io = IO(new IssueQueueIO(ew, dw, num))
+
     // assert(ew >= dw, "enq width must be greater than or equal to deq width")
     assert(num % dw == 0, "Issue Queue length must be a multiple of deq width")
     assert(num % ew == 0, "Issue Queue length must be a multiple of enq width")
@@ -130,7 +131,9 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
     val iq = RegInit(
         VecInit.fill(n)(VecInit.fill(len)(0.U.asTypeOf(new IQEntry(num))))
     )
-    
+    io.se.isCalStream := VecInit.fill(12)(false.B)
+    io.se.iterCnt := VecInit.fill(12)(false.B)
+
     val fList = Module(new ClusterIndexFIFO(
         UInt((log2Ceil(n)+log2Ceil(len)).W), num, dw, ew, 0, 0, true, 
         Some(Seq.tabulate(num)(i => ((i / len) << log2Ceil(len) | (i % len)).U((log2Ceil(n) + log2Ceil(len)).W)))
