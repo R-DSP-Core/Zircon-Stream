@@ -1,17 +1,3 @@
-## TODO：工程细节
-1. 让emulator输出
-`pc,asm,fetch,predecode,decode,dispatch,issue,readOp,exe,exe1,exe2,wb,retire,lastcommit,is_branch,` 
-数值也要对应上
-2. trace.py
-要支持上面这个格式，应该不难
-3. pipeview.py
-需要支持无用信息的筛选
-
-## TODO：DEBUG
-【上面这个等服务器好了再弄，应该很快】
-可以先研究一下issue和readOp【这个我记得好了吧...】
-这两个debug好之后一些奇怪的现象就可以解释了：例如退休的延迟 
-
 ## TODO：功能部件可视化
 
 根据指令tick
