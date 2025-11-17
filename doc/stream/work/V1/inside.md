@@ -41,10 +41,20 @@ TODO：
 2. 流engine
    1. 异步部分：alu的读写
 
+## DEBUG过程
+
+1. 检查alu itercnt和算的数
+2. 检查fifo2 的数
+3. 检查写回memory的数
 
 ## TODO
 
 1. 分支预测失误恢复：拷贝一个icntMap commit时赋值，flush时恢复
 2. 测试大循环，记录测试数据
 3. 可以考虑使用差分测试，但我觉得有没必要特别完备
+
+
+## 与cache的耦合
+
+TODO:这个应该是后两周去做
 
