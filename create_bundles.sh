@@ -17,4 +17,3 @@ git -C ZirconSim bundle create ZirconSim.bundle --all
 echo "生成 ZirconSim.bundle"
 
 echo "所有 bundle 生成完毕！"
-chm
