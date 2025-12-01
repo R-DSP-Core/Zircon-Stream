@@ -37,7 +37,7 @@ class BackendCommitIO extends Bundle {
 
 class BackendMemoryIO extends Bundle {
     val l2 = Flipped(new L2DCacheIO)
-    val stream = new MemIO(false)
+    val stream = new SEMemIO
 }
 class BackendDBGIO extends Bundle {
     val rf   = new RegfileDBGIO
@@ -189,6 +189,7 @@ class Backend extends Module {
     arPP(2).sewb <> stream.io.wb(2)
     io.mem.stream <> stream.io.mem
     mdPP.io.streamPP <> stream.io.pp //cfgstream
+    lsPP.io.se.dc   <> stream.io.dc
 
     //Dontcare
     lsIQ.io.se.ready := VecInit.fill(12)(true.B)

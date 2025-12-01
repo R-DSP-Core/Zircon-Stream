@@ -48,7 +48,7 @@ class AXIIO extends Bundle {
 
 class AXIArbiterIO extends Bundle {
     val l2  = MixedVec(Seq(Flipped(new MemIO(true)), Flipped(new MemIO(false))))
-    val stream = Flipped(new MemIO(false))
+    val stream = Flipped(new SEMemIO)
     // for Main Memory
     val axi = new AXIIO
     val dbg = new AXIDebugIO
@@ -63,10 +63,6 @@ class AXIArbiter extends Module{
         l2.rlast := false.B
         l2.rdata := io.axi.rdata
     }
-    io.stream.rrsp := false.B
-    io.stream.rlast:= false.B
-    io.stream.rdata:= io.axi.rdata
-
 
     io.axi.araddr  := io.l2(0).raddr
     io.axi.arburst := 1.U
@@ -89,8 +85,8 @@ class AXIArbiter extends Module{
     switch(rState){
         is(rIdle){
             // idle state
-            rState := Mux(io.stream.rreq, rSar, Mux( io.l2(1).rreq, rDar, Mux(io.l2(0).rreq, rIar, rIdle) ))
-            io.dbg.rdVldVec := Mux(io.stream.rreq, STREAM, Mux( io.l2(1).rreq, DATA, Mux(io.l2(0).rreq, INST, NONE) )) 
+            rState := Mux( io.l2(1).rreq, rDar, Mux(io.l2(0).rreq, rIar, rIdle))
+            io.dbg.rdVldVec := Mux( io.l2(1).rreq, DATA, Mux(io.l2(0).rreq, INST, NONE))
         }
         is(rIar){
             // icache ar shake hand state
@@ -122,6 +118,7 @@ class AXIArbiter extends Module{
             io.axi.rready  := true.B
             rState         := Mux(io.axi.rvalid && io.axi.rlast && io.axi.rready, rIdle, rDr)
         }
+        /*
         is(rSar){
             // stream ar shake hand state
             io.axi.arvalid := true.B
@@ -136,7 +133,7 @@ class AXIArbiter extends Module{
             io.stream.rlast := io.axi.rlast
             io.axi.rready   := true.B
             rState          := Mux(io.axi.rvalid && io.axi.rlast && io.axi.rready, rIdle, rSr)
-        }
+        }*/
     }
 
 
@@ -161,7 +158,7 @@ class AXIArbiter extends Module{
 
     // io.l2.foreach{ l2 => l2.wrsp.get := false.B }
     io.l2(1).wrsp.get := false.B
-    io.stream.wrsp.get := false.B
+    io.stream.wrsp := false.B
     io.axi.awaddr     := io.l2(1).waddr.get
     io.axi.awburst    := 1.U
     io.axi.awid       := 0.U
@@ -177,7 +174,7 @@ class AXIArbiter extends Module{
     switch(wState){
         is(wIdle){
             // idle state
-            wState := Mux(io.stream.wreq.get, wSaw , Mux( io.l2(1).wreq.get, wDaw, wIdle ))
+            wState := Mux(io.stream.wreq, wSaw , Mux( io.l2(1).wreq.get, wDaw, wIdle ))
         }
         is(wDaw){
             // dcache aw shake hand state
@@ -199,18 +196,18 @@ class AXIArbiter extends Module{
         is(wSaw){
             // stream aw shake hand state
             io.axi.awvalid := true.B
-            io.axi.awaddr  := io.stream.waddr.get
-            io.axi.awlen   := io.stream.wlen.get
-            io.axi.awsize  := io.stream.wsize.get
+            io.axi.awaddr  := io.stream.waddr
+            io.axi.awlen   := io.stream.wlen
+            io.axi.awsize  := io.stream.wsize
             wState         := Mux(io.axi.awready, wSw, wSaw)
         }
         is(wSw){
             // stream write data state
-            io.stream.wrsp.get := io.axi.wready
-            io.axi.wdata   := io.stream.wdata.get
-            io.axi.wstrb   := io.stream.wstrb.get
-            io.axi.wvalid     := io.stream.wreq.get
-            io.axi.wlast      := io.stream.wlast.get
+            io.stream.wrsp := io.axi.wready
+            io.axi.wdata   := io.stream.wdata
+            io.axi.wstrb   := io.stream.wstrb
+            io.axi.wvalid     := io.stream.wreq
+            io.axi.wlast      := io.stream.wlast
             wState            := Mux(io.axi.wready && io.axi.wlast && io.axi.wvalid, wSb, wSw)
         }
         is(wSb){
