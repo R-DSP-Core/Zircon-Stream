@@ -170,19 +170,19 @@ class StreamEngine extends Module {
     val loadDone = loadWordCnt === (l2LineWord - 1).U 
     val loadFirst = loadWordCnt === 0.U && loadValidReg
     
-    when(io.dc.rreq && !(io.dc.miss || io.dc.sbFull)){
+    when(io.dc.rreq && !(io.dc.miss || io.dc.sbFull)){ //即来到D1级的数量
         loadWordCnt := loadWordCnt + 1.U
-    }.elsewhen(loadDone && io.dc.rreq){
+    }.elsewhen(loadDone && io.dc.rreq){//TODO:这里似乎应该加上!(io.dc.miss || io.dc.sbFull)，否则假设29号element在D2卡住，这里的31号是无法通过D1的
         loadWordCnt := 0.U
     }
 
     when(loadDone){
-        loadValidReg := 0.U
+        loadValidReg := 0.U //TODO同理，这里也不应该直接拉低，最后一个不一定能到D1
     }.elsewhen(!(io.dc.miss || io.dc.sbFull)){
-        loadValidReg := loadValid
+        loadValidReg := loadValid //TODO这句好像不加也行？
     }
 
-    when(loadValid && loadWordCnt === 0.U && !(io.dc.miss || io.dc.sbFull)){
+    when(loadValid && loadWordCnt === 0.U && !(io.dc.miss || io.dc.sbFull)){ //这段挺对的
         loadSegSelReg := loadSegSel
         loadFifoIdReg := loadFifoId
     }
