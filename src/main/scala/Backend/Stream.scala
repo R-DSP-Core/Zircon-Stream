@@ -74,6 +74,7 @@ class StreamEngine extends Module {
     val streamMap = RegInit(VecInit.fill(streamNum)(0.U(iterBits.W))) //fifo_id -> i_id
     val addrCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
     val addrDyn = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
+    val strideCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
     val stateCfg = RegInit(VecInit.fill(streamNum)(VecInit.fill(streamCfgBits)(false.B))) //fifo_id -> [doneCfg,isLoad,...]
     val readyMap = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(false.B)))  //fifo_id,itercnt -> ready
     val Fifo = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(0.U(32.W))))  //fifo_id,itercnt -> data
@@ -91,12 +92,13 @@ class StreamEngine extends Module {
     io.pp.busy := false.B
 
     val isCfgI = op === CFGI && valid
-    val isStepI = op === STEPI && valid
     val isCfgStream = op === CFGSTREAM && valid
+    val isCfgStride = op === CFGSTRIDE && valid
     val isCal = op === CALSTREAM && valid
 
     val iId = src1(iterBits-1,0)
     val addr = src1
+    val stride = src1
     val cfgLength = src1(31,16)
     val outerIter = src1(15,0)
     val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst    
@@ -124,6 +126,10 @@ class StreamEngine extends Module {
     for (i <- 0 until 12) {
         val isWordIdx = (io.is.iterCnt(i) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
         io.is.ready(i) :=  io.is.isCalStream(i) & readyMap(0)(isWordIdx) & readyMap(1)(isWordIdx) & !readyMap(2)(isWordIdx)
+    }
+    when(isCfgStride){
+        strideCfg(fifoId(Dst)) := stride
+        stateCfg(fifoId(Dst)) := ppBits.cfgState
     }
 
     // ReadOp stage + writeback stage
@@ -166,13 +172,13 @@ class StreamEngine extends Module {
     val loadValidReg      = RegInit(false.B)
     val loadFifoIdReg     = RegInit(0.U(streamBits.W))
     val loadSegSelReg     = RegInit(0.U(log2Ceil(fifoSegNum).W))
-    val loadAddr = addrDyn(loadFifoIdReg) + (loadWordCnt << 2.U)
+    val loadAddr = addrDyn(loadFifoIdReg) + loadWordCnt * strideCfg(loadFifoIdReg)
     val loadDone = loadWordCnt === (l2LineWord - 1).U 
     val loadFirst = loadWordCnt === 0.U && loadValidReg
     
-    when(io.dc.rreq && !(io.dc.miss || io.dc.sbFull)){ //即来到D1级的数量
+    when(io.dc.rreq && !(io.dc.miss || io.dc.sbFull)){
         loadWordCnt := loadWordCnt + 1.U
-    }.elsewhen(loadDone && io.dc.rreq){//TODO:这里似乎应该加上!(io.dc.miss || io.dc.sbFull)，否则假设29号element在D2卡住，这里的31号是无法通过D1的
+    }.elsewhen(loadDone && io.dc.rreq){
         loadWordCnt := 0.U
     }
 
@@ -193,7 +199,7 @@ class StreamEngine extends Module {
         {
             oIterCntMap(loadFifoIdReg) :=oIterCntMap(loadFifoIdReg) + 1.U
         }
-        addrDyn(loadFifoIdReg)     := Mux(isWrap, addrCfg(loadFifoIdReg), addrDyn(loadFifoIdReg) + l2Line.U)
+        addrDyn(loadFifoIdReg)     := Mux(isWrap, addrCfg(loadFifoIdReg), addrDyn(loadFifoIdReg) + l2LineWord.U * strideCfg(loadFifoIdReg))
         burstCntMap(loadFifoIdReg)  := burstCntMap(loadFifoIdReg) + 1.U
     }
     io.dc.rreq      := loadValidReg

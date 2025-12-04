@@ -58,7 +58,7 @@ object EXEOp {
     val CFGI = 0x0.U(stInstBits.W)
     val CFGSTREAM = 0x1.U(stInstBits.W)
     val CALSTREAM = 0x2.U(stInstBits.W)
-    val STEPI = 0x3.U(stInstBits.W)
+    val CFGSTRIDE = 0x3.U(stInstBits.W)
 }
 
 object JumpOp{
