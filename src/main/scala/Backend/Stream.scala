@@ -220,7 +220,7 @@ class StreamEngine extends Module {
         {
             oIterCntMap(loadFifoIdReg) :=oIterCntMap(loadFifoIdReg) + 1.U
         }
-        addrDyn(loadFifoIdReg)     := Mux(isWrap, addrCfg(loadFifoIdReg), addrDyn(loadFifoIdReg) + l2Line.U)
+        addrDyn(loadFifoIdReg)     := Mux(isWrap, addrCfg(loadFifoIdReg), addrDyn(loadFifoIdReg) + l2LineWord.U * strideCfg(loadFifoIdReg))
         burstCntMap(loadFifoIdReg)  := burstCntMap(loadFifoIdReg) + 1.U
     }
     io.dc.rreq      := loadValidReg
