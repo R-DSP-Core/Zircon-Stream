@@ -11,6 +11,7 @@ object Stream {
     // bits in stream state
     val DONECFG = 0
     val LDSTRAEM = 1
+    val counterWidth = 2
 }
 
 object FifoRole {
@@ -53,12 +54,13 @@ object EXEOp {
     val REMU    = 0x7.U(4.W)
 
     // stream
-    val stInstBits = 2
+    val stInstBits = 3
     val streamCfgBits = 2
     val CFGI = 0x0.U(stInstBits.W)
     val CFGSTREAM = 0x1.U(stInstBits.W)
     val CALSTREAM = 0x2.U(stInstBits.W)
     val CFGSTRIDE = 0x3.U(stInstBits.W)
+    val CFGREUSE = 0x4.U(stInstBits.W)
 }
 
 object JumpOp{
