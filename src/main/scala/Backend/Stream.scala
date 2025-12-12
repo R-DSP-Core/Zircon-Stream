@@ -93,7 +93,7 @@ class StreamEngine extends Module {
     val valid = io.pp.valid
 
     val isCfgI = op === CFGI && valid
-    val isCfgStream = op === CFGSTREAM && valid
+    val isCfgStream = (op === CFGLOAD || op=== CFGSTORE) && valid
     val isCfgStride = op === CFGSTRIDE && valid
     val isCfgReuse = op === CFGREUSE && valid
     val isCal = op === CALSTREAM && valid
