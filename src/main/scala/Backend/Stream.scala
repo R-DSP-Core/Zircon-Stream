@@ -207,18 +207,20 @@ class StreamEngine extends Module {
     val loadFifoIdReg     = RegInit(0.U(streamBits.W))
     val loadSegSelReg     = RegInit(0.U(log2Ceil(fifoSegNum).W))
     val loadAddr = addrDyn(loadFifoIdReg) + loadWordCnt * strideCfg(loadFifoIdReg)
-    val loadDone = loadWordCnt === (l2LineWord - 1).U 
+    val loadLastOne = loadWordCnt === (l2LineWord - 1).U 
+    val loadDone = loadLastOne && (io.dc.rreq && !(io.dc.miss || io.dc.sbFull))
     val loadFirst = loadWordCnt === 0.U && loadValidReg
     
     when(io.dc.rreq && !(io.dc.miss || io.dc.sbFull)){
         loadWordCnt := loadWordCnt + 1.U
-    }.elsewhen(loadDone && io.dc.rreq){
-        loadWordCnt := 0.U
+        when(loadLastOne){
+            loadWordCnt := 0.U
+        }
     }
 
     when(loadDone){
-        loadValidReg := 0.U
-    }.elsewhen(!(io.dc.miss || io.dc.sbFull)){
+        loadValidReg := false.B
+    }.elsewhen(!loadValidReg){
         loadValidReg := loadValid
     }
 
