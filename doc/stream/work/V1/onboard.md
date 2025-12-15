@@ -14,6 +14,16 @@
 4. C output_x的计算细节
    1. 由K个流乘法指令和K个普通累加指令完成，最后写入`通用寄存器`及数组(`cache`)
 
+### 更新（待整理）
+  - 新增若干流指令，梳理清楚软硬件代码
+    - 流计算指令增加 “写rd的指令”，使用funct3与“不写rd指令”区分
+    - 流配置指令增加cfg i-limit i-repeat指令，用于更灵活的支持itermap的增加（递增到某limit回环，直到达到repeat次）
+    - 流配置指令增加cfg tile-stride指令，用于支持gemm-B的 列->列 取数规则
+  - 硬件上，原有逻辑是所有操作数都来自与buffer，且共享同一个itermap；而现在它们不一定来自buffer，且使用各自的itermap。下面称指令的源1 源2和目的操作数分别为op0 op1和op2
+    - dispatch阶段原来是根据fireStream对单个itermap递增，现在要把三个操作数分开，分别递增，分别获取值
+      - 同时不能简单的递增，而是需要根据配置指令进行适当的回环
+    - issue readop writeback阶段：都需要分别考虑三个操作数（三个操作数各自的itercnt && 是否usebuffer）
+
 ### TODO
 1. 写一个仿真环境，difftest
 2. 目前做的事16*16，L1放得下数组B
