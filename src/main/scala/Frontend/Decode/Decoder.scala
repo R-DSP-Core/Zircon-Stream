@@ -84,7 +84,7 @@ class Decoder extends Module{
 
     io.sinfo.op := funct3(stInstBits-1,0)
     io.sinfo.state(DONECFG) := isStream
-    io.sinfo.state(LDSTRAEM) := funct3(stInstBits)
+    io.sinfo.state(LDSTRAEM) := funct3 === 5.U //3'b101 store
 
     io.isCalStream := isCalStream
 }

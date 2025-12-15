@@ -4,6 +4,7 @@ import ZirconConfig.Stream._
 import ZirconConfig.Cache._
 import ZirconConfig.EXEOp._
 import ZirconConfig.FifoRole._
+import ZirconConfig.Issue._
 
 class SERFIO extends Bundle {
     val iterCnt = Input(UInt(32.W))
@@ -18,9 +19,9 @@ class SEWBIO extends Bundle {
 }
 
 class SEISIO extends Bundle {
-    val isCalStream = Input(Vec(12,Bool()))
-    val iterCnt = Input(Vec(12,UInt(32.W)))
-    val ready  = Output(Vec(12, Bool()))
+    val isCalStream = Input(Vec(arithNiq,Bool()))
+    val iterCnt = Input(Vec(arithNiq,UInt(32.W)))
+    val ready  = Output(Vec(arithNiq, Bool()))
 }
 
 class SEPipelineIO extends Bundle {
@@ -125,12 +126,10 @@ class StreamEngine extends Module {
 
     when(isCfgStride){
         strideCfg(fifoId(Dst)) := stride
-        stateCfg(fifoId(Dst)) := ppBits.cfgState
     }
 
     when(isCfgReuse){
         reuseCfg(fifoId(Dst)) := reusecnt
-        stateCfg(fifoId(Dst)) := ppBits.cfgState
     }
 
     // ReadOp stage + writeback stage
@@ -153,12 +152,12 @@ class StreamEngine extends Module {
     io.rdIter.iterCnt := iCntMap(0)
 
     // Issue stage
-    for (i <- 0 until 12) {
+    for (i <- 0 until arithNiq) {
         val isWordIdx = (io.is.iterCnt(i) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
-        io.is.ready(i) :=  io.is.isCalStream(i) 
-                         & loadreadyMap(0)(isWordIdx) =/= 0.U 
-                         & loadreadyMap(1)(isWordIdx) =/= 0.U
-                         & !storereadyMap(isWordIdx) 
+        io.is.ready(i) :=  io.is.isCalStream(i) &
+                          (loadreadyMap(0)(isWordIdx) =/= 0.U) &
+                          (loadreadyMap(1)(isWordIdx) =/= 0.U) &
+                          !storereadyMap(isWordIdx) 
     }
 
     
@@ -189,7 +188,7 @@ class StreamEngine extends Module {
     // fifoSegEmpty：Vec[streamNum,Vec(fifoSegNum,bool())]
     val fifoSegEmpty = VecInit.tabulate(streamNum-1){j=>
         VecInit.tabulate(fifoSegNum){k=>
-            loadreadyMap(j).slice(k*l2LineWord, (k+1)*l2LineWord).reduce(_ && (_ === 0.U))  &&  
+            loadreadyMap(j).slice(k*l2LineWord, (k+1)*l2LineWord).map(_ === 0.U).reduce(_ && _)  &&  
             stateCfg(j)(LDSTRAEM) && stateCfg(j)(DONECFG)  && 
             (burstCntMap(j)(0)===k.U && oIterCntMap(j)=/=outerIterMap(j))
         }
@@ -317,7 +316,7 @@ class StreamEngine extends Module {
     //----------------- 2.2:WRITE -------------------
     val storeFifoId = 2
 
-    val wFifoSegFull = VecInit.tabulate(fifoSegNum){ k=> storereadyMap(storeFifoId).slice(k*l2LineWord, (k+1)*l2LineWord).reduce(_ && _) }
+    val wFifoSegFull = VecInit.tabulate(fifoSegNum){ k=> storereadyMap.slice(k*l2LineWord, (k+1)*l2LineWord).reduce(_ && _) }
     val storeSegSel = PriorityEncoder(wFifoSegFull)
     val storeValid = stateCfg(storeFifoId)(DONECFG) && !stateCfg(storeFifoId)(LDSTRAEM) && wFifoSegFull.asUInt.orR
     
@@ -327,7 +326,7 @@ class StreamEngine extends Module {
     val storeFifoIdx  = (storeSegSelReg * l2LineWord.U + storeWordCnt)(log2Ceil(fifoWord)-1,0) 
     when (io.mem.wreq && io.mem.wrsp){
         storeWordCnt := storeWordCnt + 1.U
-        storereadyMap(storeFifoId)(storeFifoIdx):=false.B
+        storereadyMap(storeFifoIdx):=false.B
         //printf(p"STORE FIFO | id = $storeFifoId | idx = $storeFifoIdx | value = ${io.mem.wdata.get}\n")
     }
     when(!storeValidReg){
