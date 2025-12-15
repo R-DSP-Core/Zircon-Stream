@@ -11,8 +11,8 @@ import ZirconUtil._
 // 输入： iter的值
 // 把正确的 iter值带着，进入IQ
 class SERdIterIO extends Bundle{
-    val fireStream = Output(Vec(ndcd,Bool()))
-    val iterCnt = Input(UInt(32.W))
+    val fireStreamOp = Output(Vec(3,Vec(ndcd,Bool())))
+    val iterCnt = Input(Vec(3,UInt(32.W)))
 }
 
 
@@ -35,14 +35,22 @@ class Dispatch extends Module {
 
     // TODO
     for (i <- 0 until ndcd) {
-      io.seRIter.fireStream(i) := io.fte.instPkg(i).bits.isCalStream && io.cmt.rob.enq(i).fire
+        val instBits = io.fte.instPkg(i).bits
+        val useBuffer = instBits.sinfo.useBuffer
+        val fireStream = instBits.isCalStream && io.cmt.rob.enq(i).fire
+        for (b <- 0 until 3) {
+          io.seRIter.fireStreamOp(b)(i) := fireStream && useBuffer(b)
+        }
     }     
-    val seIter = WireInit(VecInit.fill(ndcd)(0.U(32.W)))
-    seIter(0) := io.seRIter.iterCnt
-    for (i <- 1 until ndcd) {
-      seIter(i) := Mux(io.seRIter.fireStream(i-1), seIter(i-1) + 1.U, seIter(i-1))
-    } 
-
+    
+    val seIter = WireInit(VecInit.fill(3)(VecInit.fill(ndcd)(0.U(32.W))))
+    for (b <- 0 until 3) {
+        seIter(b)(0) := io.seRIter.iterCnt(b)
+        for (i <- 1 until ndcd) {
+            seIter(b)(i) := Mux(io.seRIter.fireStreamOp(b)(i-1), seIter(b)(i-1) + 1.U, seIter(b)(i-1))
+        } 
+    }
+    
     // ready board
     rboard.io.pinfo   := io.fte.instPkg.map(_.bits.pinfo)
     rboard.io.wakeBus := io.bke.wakeBus
@@ -50,7 +58,7 @@ class Dispatch extends Module {
     rboard.io.flush   := io.cmt.flush
 
     val ftePkg = VecInit.tabulate(ndcd){ i =>  
-        val iter = seIter(i) //TODO
+        val iter = seIter.map(_.apply(i))
         (new BackendPackage)(io.fte.instPkg(i).bits, io.cmt.rob.enqIdx(i), io.cmt.bdb.enqIdx(i), rboard.io.prjInfo(i), rboard.io.prkInfo(i), iter)
     }
 

@@ -114,7 +114,7 @@ class LSPipeline extends Module {
     io.wk.wakeD1 := (new WakeupBusPkg)(instPkgD1, io.wk.rplyIn, 2)
     // dcache
     dc.io.cmt           := io.cmt.dc
-    dc.io.mmu.paddr     := Mux(io.se.dc.rreqD1, io.se.dc.vaddr, instPkgD1.src1)
+    dc.io.mmu.paddr     := Mux(io.se.dc.rreqD1, io.se.dc.paddrD1, instPkgD1.src1)
     // TODO: add mmu
     dc.io.mmu.uncache   := Mux(io.se.dc.rreqD1, 0.U, instPkgD1.src1(31, 28) === 0xa.U)
     dc.io.mmu.exception := 0.U(8.W)

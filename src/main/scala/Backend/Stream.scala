@@ -4,6 +4,7 @@ import ZirconConfig.Stream._
 import ZirconConfig.Cache._
 import ZirconConfig.EXEOp._
 import ZirconConfig.FifoRole._
+import ZirconConfig.Issue._
 
 class SERFIO extends Bundle {
     val iterCnt = Input(UInt(32.W))
@@ -18,9 +19,9 @@ class SEWBIO extends Bundle {
 }
 
 class SEISIO extends Bundle {
-    val isCalStream = Input(Vec(12,Bool()))
-    val iterCnt = Input(Vec(12,UInt(32.W)))
-    val ready  = Output(Vec(12, Bool()))
+    val isCalStream = Input(Vec(arithNiq,Bool()))
+    val iterCnt = Input(Vec(arithNiq,UInt(32.W)))
+    val ready  = Output(Vec(arithNiq, Bool()))
 }
 
 class SEPipelineIO extends Bundle {
@@ -70,12 +71,21 @@ class StreamEngine extends Module {
     val io = IO(new StreamEngineIO)
     
 
-    val iCntMap = RegInit(VecInit.fill(iterNum)(0.U(32.W)))    //i_id -> itercnt
+    val iCntMap = RegInit(VecInit.fill(streamNum)(0.U(32.W)))    //fifo_id -> itercnt
+    val iLimitCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_limit
+    val iLimitDyn = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> cur i_limit
+    val iRepeatCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_repeat
+    val iRepeatDyn = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> cur i_repeat 
+
     val streamMap = RegInit(VecInit.fill(streamNum)(0.U(iterBits.W))) //fifo_id -> i_id
     val addrCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
     val addrDyn = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
+    val strideCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
+    val tileStrideCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
+    val reuseCfg = RegInit(VecInit.fill(streamNum)(0.U(counterWidth.W)))
     val stateCfg = RegInit(VecInit.fill(streamNum)(VecInit.fill(streamCfgBits)(false.B))) //fifo_id -> [doneCfg,isLoad,...]
-    val readyMap = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(false.B)))  //fifo_id,itercnt -> ready
+    val loadreadyMap = RegInit(VecInit.fill(streamNum-1)(VecInit.fill(fifoWord)(0.U(counterWidth.W))))
+    val storereadyMap = RegInit(VecInit.fill(fifoWord)(false.B))
     val Fifo = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(0.U(32.W))))  //fifo_id,itercnt -> data
 
     val lengthMap = RegInit(VecInit.fill(streamNum)(0.U(16.W))) //fifo_id -> load length
@@ -91,39 +101,87 @@ class StreamEngine extends Module {
     io.pp.busy := false.B
 
     val isCfgI = op === CFGI && valid
-    val isStepI = op === STEPI && valid
-    val isCfgStream = op === CFGSTREAM && valid
+    val isCfgILimit = op === CFGILIMIT && valid
+    val isCfgIRepeat = op === CFGIREPEAT && valid
+    val isCfgStream = (op === CFGLOAD || op=== CFGSTORE) && valid
+    val isCfgStride = op === CFGSTRIDE && valid
+    val isCfgTileStride = op === CFGTILESTRIDE && valid
+    val isCfgReuse = op === CFGREUSE && valid
     val isCal = op === CALSTREAM && valid
+    val isCalRd = op === CALSTREAMRD && valid
+
 
     val iId = src1(iterBits-1,0)
     val addr = src1
+    val stride = src1
+    val tileStride = src1
+    val reusecnt = src1
     val cfgLength = src1(31,16)
     val outerIter = src1(15,0)
+    val cfgIlimit = src1
+    val cfgIrepeat = src1
     val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst    
 
     //----------------- 1:CORE -------------------
     //config
     when(isCfgI){
-        iCntMap(0) := 0.U
+        iCntMap(fifoId(Dst)) := 0.U
         streamMap(fifoId(Dst)) := 0.U
         lengthMap(fifoId(Dst)) := cfgLength / l2LineWord.U
         outerIterMap(fifoId(Dst)) := outerIter
+    }
+    when(isCfgILimit){
+        iLimitCfg(fifoId(Dst)) := cfgIlimit
+        iLimitDyn(fifoId(Dst)) := cfgIlimit
+    }
+    when(isCfgIRepeat){
+        iRepeatCfg(fifoId(Dst)) := cfgIrepeat
+        iRepeatDyn(fifoId(Dst)) := cfgIrepeat
     }
     when(isCfgStream){
         addrCfg(fifoId(Dst)) := addr 
         addrDyn(fifoId(Dst)) := addr 
         stateCfg(fifoId(Dst)) := ppBits.cfgState
     }
+    when(isCfgStride){
+        strideCfg(fifoId(Dst)) := stride
+    }
+    when(isCfgTileStride){
+        tileStrideCfg(fifoId(Dst)) := tileStride
+    }
+    when(isCfgReuse){
+        reuseCfg(fifoId(Dst)) := reusecnt
+    }
 
     // dispatch stage
-    val fireNum = PopCount(io.rdIter.fireStream)
-    iCntMap(0) := iCntMap(0) + fireNum
-    io.rdIter.iterCnt := iCntMap(0)
+    //TODO：这里的假设是 0，1，2号流分别是RS1，RS2，RD
+    for (b <- 0 until 3) {  
+        val sum = iCntMap(b) + PopCount(io.rdIter.fireStreamOp(b))
+        when(sum < iLimitDyn(b)){
+            iCntMap(b) := sum
+        }.elsewhen (iRepeatDyn(b) + 1.U === iRepeatCfg(b)){
+            iCntMap(b) := sum
+            iLimitDyn(b) := iLimitDyn(b) + iLimitCfg(b)
+            iRepeatDyn(b) := 0.U
+        }.otherwise{
+            iCntMap(b) := sum - iLimitCfg(b) //sum - iLimitDyn(b) + iLimitDyn(b) - iLimitCfg(b)
+            iRepeatDyn(b) := iRepeatDyn(b) + 1.U
+        }
+        io.rdIter.iterCnt(b) := iCntMap(b)
+    }
 
     // Issue stage
-    for (i <- 0 until 12) {
+    for (i <- 0 until arithNiq) {
+        val issWordIdx = VecInit.fill(3)(0.U(log2Ceil(fifoWord).W))
+        for (b <- 0 until 3) {
+            issWordIdx(b) := (io.is.iterCnt(i)(b) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
+        }
+
         val isWordIdx = (io.is.iterCnt(i) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
-        io.is.ready(i) :=  io.is.isCalStream(i) & readyMap(0)(isWordIdx) & readyMap(1)(isWordIdx) & !readyMap(2)(isWordIdx)
+        io.is.ready(i) :=  io.is.isCalStream(i) &
+                          (loadreadyMap(0)(isWordIdx) =/= 0.U) &
+                          (loadreadyMap(1)(isWordIdx) =/= 0.U) &
+                          !storereadyMap(isWordIdx) 
     }
 
     // ReadOp stage + writeback stage
@@ -134,9 +192,9 @@ class StreamEngine extends Module {
         when(io.wb(i).wvalid){
             val wbWordIdx = (io.wb(i).iterCnt % fifoWord.U) (log2Ceil(fifoWord)-1,0)
             Fifo(2)(wbWordIdx) := io.wb(i).wdata
-            readyMap(0)(wbWordIdx) := false.B
-            readyMap(1)(wbWordIdx) := false.B
-            readyMap(2)(wbWordIdx) := true.B
+            loadreadyMap(0)(wbWordIdx) := loadreadyMap(0)(wbWordIdx) - 1.U
+            loadreadyMap(1)(wbWordIdx) := loadreadyMap(1)(wbWordIdx) - 1.U
+            storereadyMap(wbWordIdx) := true.B 
         }
     }
 
@@ -147,9 +205,9 @@ class StreamEngine extends Module {
 
     //----------------- 2.1:READ -------------------
     // fifoSegEmpty：Vec[streamNum,Vec(fifoSegNum,bool())]
-    val fifoSegEmpty = VecInit.tabulate(streamNum){j=>
+    val fifoSegEmpty = VecInit.tabulate(streamNum-1){j=>
         VecInit.tabulate(fifoSegNum){k=>
-            !readyMap(j).slice(k*l2LineWord, (k+1)*l2LineWord).reduce(_ || _)  &&  
+            loadreadyMap(j).slice(k*l2LineWord, (k+1)*l2LineWord).map(_ === 0.U).reduce(_ && _)  &&  
             stateCfg(j)(LDSTRAEM) && stateCfg(j)(DONECFG)  && 
             (burstCntMap(j)(0)===k.U && oIterCntMap(j)=/=outerIterMap(j))
         }
@@ -166,23 +224,25 @@ class StreamEngine extends Module {
     val loadValidReg      = RegInit(false.B)
     val loadFifoIdReg     = RegInit(0.U(streamBits.W))
     val loadSegSelReg     = RegInit(0.U(log2Ceil(fifoSegNum).W))
-    val loadAddr = addrDyn(loadFifoIdReg) + (loadWordCnt << 2.U)
-    val loadDone = loadWordCnt === (l2LineWord - 1).U 
+    val loadAddr = addrDyn(loadFifoIdReg) + loadWordCnt * strideCfg(loadFifoIdReg)
+    val loadLastOne = loadWordCnt === (l2LineWord - 1).U 
+    val loadDone = loadLastOne && (io.dc.rreq && !(io.dc.miss || io.dc.sbFull))
     val loadFirst = loadWordCnt === 0.U && loadValidReg
     
     when(io.dc.rreq && !(io.dc.miss || io.dc.sbFull)){
         loadWordCnt := loadWordCnt + 1.U
-    }.elsewhen(loadDone && io.dc.rreq){
-        loadWordCnt := 0.U
+        when(loadLastOne){
+            loadWordCnt := 0.U
+        }
     }
 
     when(loadDone){
-        loadValidReg := 0.U
-    }.elsewhen(!(io.dc.miss || io.dc.sbFull)){
+        loadValidReg := false.B
+    }.elsewhen(!loadValidReg){
         loadValidReg := loadValid
     }
 
-    when(loadValid && loadWordCnt === 0.U && !(io.dc.miss || io.dc.sbFull)){
+    when(loadValid && loadWordCnt === 0.U && !(io.dc.miss || io.dc.sbFull)){ //这段挺对的
         loadSegSelReg := loadSegSel
         loadFifoIdReg := loadFifoId
     }
@@ -193,7 +253,7 @@ class StreamEngine extends Module {
         {
             oIterCntMap(loadFifoIdReg) :=oIterCntMap(loadFifoIdReg) + 1.U
         }
-        addrDyn(loadFifoIdReg)     := Mux(isWrap, addrCfg(loadFifoIdReg), addrDyn(loadFifoIdReg) + l2Line.U)
+        addrDyn(loadFifoIdReg)     := Mux(isWrap, addrCfg(loadFifoIdReg), addrDyn(loadFifoIdReg) + tileStrideCfg(loadFifoIdReg))
         burstCntMap(loadFifoIdReg)  := burstCntMap(loadFifoIdReg) + 1.U
     }
     io.dc.rreq      := loadValidReg
@@ -267,7 +327,7 @@ class StreamEngine extends Module {
     val wFifoIdx  = (loadSegSelRegWB * l2LineWord.U + loadWordCntRegWB)(log2Ceil(fifoWord)-1,0) 
     when(wFifoWen) {
         Fifo(loadFifoIdRegWB)(wFifoIdx) := wFifoData
-        readyMap(loadFifoIdRegWB)(wFifoIdx) := true.B
+        loadreadyMap(loadFifoIdRegWB)(wFifoIdx) := reuseCfg(loadFifoIdRegWB)
         //printf(p"LOAD FIFO | id = $loadFifoIdReg | idx = $wFifoIdx | value = $wFifoData\n")
     }
 
@@ -275,7 +335,7 @@ class StreamEngine extends Module {
     //----------------- 2.2:WRITE -------------------
     val storeFifoId = 2
 
-    val wFifoSegFull = VecInit.tabulate(fifoSegNum){ k=> readyMap(storeFifoId).slice(k*l2LineWord, (k+1)*l2LineWord).reduce(_ && _) }
+    val wFifoSegFull = VecInit.tabulate(fifoSegNum){ k=> storereadyMap.slice(k*l2LineWord, (k+1)*l2LineWord).reduce(_ && _) }
     val storeSegSel = PriorityEncoder(wFifoSegFull)
     val storeValid = stateCfg(storeFifoId)(DONECFG) && !stateCfg(storeFifoId)(LDSTRAEM) && wFifoSegFull.asUInt.orR
     
@@ -285,7 +345,7 @@ class StreamEngine extends Module {
     val storeFifoIdx  = (storeSegSelReg * l2LineWord.U + storeWordCnt)(log2Ceil(fifoWord)-1,0) 
     when (io.mem.wreq && io.mem.wrsp){
         storeWordCnt := storeWordCnt + 1.U
-        readyMap(storeFifoId)(storeFifoIdx):=false.B
+        storereadyMap(storeFifoIdx):=false.B
         //printf(p"STORE FIFO | id = $storeFifoId | idx = $storeFifoIdx | value = ${io.mem.wdata.get}\n")
     }
     when(!storeValidReg){

@@ -103,7 +103,7 @@ class IssueQueueDBGIO extends Bundle {
 
 class IsSEIO extends Bundle {
     val isCalStream = Output(Vec(12,Bool()))
-    val iterCnt = Output(Vec(12,UInt(32.W)))
+    val iterCnt = Output(Vec(12,Vec(3,UInt(32.W))))
     val ready  = Input(Vec(12, Bool()))
 }
 
@@ -132,7 +132,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
         VecInit.fill(n)(VecInit.fill(len)(0.U.asTypeOf(new IQEntry(num))))
     )
     io.se.isCalStream := VecInit.fill(12)(false.B)
-    io.se.iterCnt := VecInit.fill(12)(false.B)
+    io.se.iterCnt := VecInit.fill(12)(VecInit.fill(3)(0.U(32.W)))
 
     val fList = Module(new ClusterIndexFIFO(
         UInt((log2Ceil(n)+log2Ceil(len)).W), num, dw, ew, 0, 0, true, 

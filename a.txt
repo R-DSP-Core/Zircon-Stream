@@ -1,0 +1,23 @@
+[VERILATE] build/VCPU
+- V e r i l a t i o n   R e p o r t: Verilator 5.043 devel rev v5.042-55-g5c0ad5bd1
+- Verilator: Built from 2.134 MB sources in 80 modules, into 25.637 MB in 30 C++ files needing 0.005 MB
+- Verilator: Walltime 21.845 s (elab=1.323, cvt=18.350, bld=0.000); cpu 23.107 s on 8 threads; alloced 601.844 MB
+[MAKE] build/VCPU
+[RUN] build/VCPU
+========================================
+SIMULATION STARTED.
+Total cycles: 26024, IPC: 1.30007========================================
+SIMULATION ENDED SUCCESSFULLY.
+Last 8 instructions:
+800002c4: fff58593
+800002c8: 0005300b
+800002cc: fe059ae3
+800002d0: 00000513
+800002d4: 7f010113
+800002d8: 02010113
+800002dc: 00008067
+8000030c: 80000000
+Total cycles: 31496, Total insts: 41071, IPC: 1.30401
+========================================
+    stream-add: [ACCEPT]
+luot@luot-VMware-Virtual-Platform:~/Zircon/RV-Software/stream-test$ 

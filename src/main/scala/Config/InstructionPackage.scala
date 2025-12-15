@@ -60,13 +60,13 @@ class BackendPackage extends Bundle {
     val nxtCmtEn   = Bool()
     val sinfo      = new StreamInfo()
     val isCalStream = Bool()
-    val iterCnt    = UInt(32.W)
+    val iterCnt    = Vec(3,UInt(32.W))
 
     //for profiling
     val cycles = new cycleStat()
 
     
-    def apply(fte: FrontendPackage, robIdx: ClusterEntry, bdbIdx: ClusterEntry, prjInfo: ReadyBoardEntry, prkInfo: ReadyBoardEntry, iter: UInt): BackendPackage = {
+    def apply(fte: FrontendPackage, robIdx: ClusterEntry, bdbIdx: ClusterEntry, prjInfo: ReadyBoardEntry, prkInfo: ReadyBoardEntry, iter: Vec[UInt]): BackendPackage = {
         val bke = WireDefault(0.U.asTypeOf(new BackendPackage))
         bke.valid      := fte.valid
         bke.pc         := fte.pc

@@ -8,6 +8,7 @@ import ZirconConfig.Stream._
 class StreamInfo extends Bundle{
     val op = Output(UInt(stInstBits.W))
     val state = Output(Vec(streamCfgBits,Bool()))
+    val useBuffer = Output(Vec(3,Bool()))
 }
 
 class DecoderIO extends Bundle{
@@ -39,9 +40,25 @@ class Decoder extends Module{
     val isStore      = inst(6, 0) === 0x23.U || isAtom && inst(31, 27) === 0x03.U
     val isMem        = isLoad || isStore
     val isMuldiv     = inst(6, 0) === 0x33.U && funct7(0) === 1.U
-    val isStream     = inst(6,0) === 0x0b.U
-    val isCalStream  = isStream && funct3 === CALSTREAM
+    val isStream     = inst(6, 0) === 0x0b.U
+
+    /*  stream op:
+        4bit指示stream op
+        由funct3 funct7共同decode得到
+    */
+    io.sinfo.op := 0.U(1.W) ## funct3 //默认情况
+    when(funct3 === 0x0.U){ //CFGI
+        io.sinfo.op := Mux(funct7 === 0x1.U, CFGILIMIT , (Mux(funct7 === 0x2.U, CFGIREPEAT, CFGI)))
+    }
+    io.sinfo.state(DONECFG) := isStream
+    io.sinfo.state(LDSTRAEM) := io.sinfo.op === CFGLOAD
+    io.isCalStream := isCalStream
+    val isCalStream  = isStream && (io.sinfo.op === CALSTREAM || io.sinfo.op === CALSTREAMRD)
     val isCfgStream  = isStream && !isCalStream
+    for (i <- 0 until 2) { //rs1 rs2
+        io.sinfo.useBuffer(i) := Mux(isCalStream, true.B, false.B)
+    }       
+    io.sinfo.useBuffer(2) := Mux(io.sinfo.op === CALSTREAM, true.B, false.B) //rd
 
     /* op: 
         bit6: indicates src1 source, 0-reg 1-pc, or indicates store, 1-store, 0-not
@@ -59,7 +76,7 @@ class Decoder extends Module{
         isJal         -> JAL(3, 0),
         isBr          -> 1.U(1.W) ## funct3,
         isMem         -> isAtom ## funct3,
-        isCalStream   -> 0.U
+        isCalStream   -> 0.U //TODO
     ))
     io.op := op_6 ## op_5 ## op_4 ## op_3_0
 
@@ -82,9 +99,4 @@ class Decoder extends Module{
 
     io.func := isMem ## (isMuldiv || isPriv || isCfgStream) ## !(isMem || isMuldiv || isPriv || isCfgStream)
 
-    io.sinfo.op := funct3(stInstBits-1,0)
-    io.sinfo.state(DONECFG) := isStream
-    io.sinfo.state(LDSTRAEM) := funct3(stInstBits)
-
-    io.isCalStream := isCalStream
 }
