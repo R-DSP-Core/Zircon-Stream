@@ -58,7 +58,7 @@ class Dispatch extends Module {
     rboard.io.flush   := io.cmt.flush
 
     val ftePkg = VecInit.tabulate(ndcd){ i =>  
-        val iter = seIter.map(_.apply(i))
+        val iter = VecInit(seIter.map(_(i)))
         (new BackendPackage)(io.fte.instPkg(i).bits, io.cmt.rob.enqIdx(i), io.cmt.bdb.enqIdx(i), rboard.io.prjInfo(i), rboard.io.prkInfo(i), iter)
     }
 

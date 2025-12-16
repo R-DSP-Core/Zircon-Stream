@@ -180,7 +180,7 @@ class Backend extends Module {
     //stream engine
     val stream = Module(new StreamEngine)
     io.seRIter <> stream.io.rdIter //dispatch
-    arIQ.io.se  <> stream.io.is //issue
+    arIQ.io.se  <> stream.io.iss //issue
     arPP(0).serf <> stream.io.rf(0)
     arPP(1).serf <> stream.io.rf(1)
     arPP(2).serf <> stream.io.rf(2)

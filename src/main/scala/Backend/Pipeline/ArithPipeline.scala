@@ -4,6 +4,7 @@ import ZirconConfig.Issue._
 import ZirconConfig.Commit._
 import ZirconConfig.Decode._
 import ZirconConfig.RegisterFile._
+import ZirconConfig.EXEOp._
 
 abstract class PipelineROBIO extends Bundle {
     val widx    = Output(new ClusterEntry(nrobQ, ndcd))
@@ -56,11 +57,7 @@ class ArithWakeupIO extends Bundle {
     val rplyIn    = Input(new ReplayBusPkg)
 }
 
-class ArithSERFIO extends Bundle {
-    val iterCnt = Output(UInt(32.W))
-    val rdata1 = Input(UInt(32.W))
-    val rdata2 = Input(UInt(32.W))
-}
+
 
 class ArithSEWBIO extends Bundle {
     val wvalid = Output(Bool())
@@ -74,8 +71,8 @@ class ArithPipelineIO extends Bundle {
     val cmt = new ArithCommitIO
     val fwd = new ArithForwardIO
     val wk  = new ArithWakeupIO
-    val serf = new ArithSERFIO
-    val sewb = new ArithSEWBIO
+    val serf = Flipped(new SERFIO)
+    val sewb = Flipped(new SEWBIO)
 }
 
 class ArithPipeline extends Module {
@@ -191,6 +188,7 @@ class ArithPipeline extends Module {
     io.rf.wr.prdData   := instPkgWB.rfWdata
 
     io.sewb.wvalid  := instPkgWB.isCalStream
+    io.sewb.useBuffer := instPkgWB.sinfo.useBuffer
     io.sewb.iterCnt := instPkgWB.iterCnt
     io.sewb.wdata   :=  instPkgWB.rfWdata
     // forward

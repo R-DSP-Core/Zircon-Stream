@@ -6,6 +6,7 @@ import ZirconConfig.Commit._
 import ZirconConfig.Decode._
 import ZirconUtil._
 import Log2OH._
+import ZirconConfig.EXEOp._
 
 class ReplayBusPkg extends Bundle {
     val prd     = UInt(wpreg.W)
@@ -101,12 +102,6 @@ class IssueQueueDBGIO extends Bundle {
     val fullCycle = UInt(64.W)
 }
 
-class IsSEIO extends Bundle {
-    val isCalStream = Output(Vec(12,Bool()))
-    val iterCnt = Output(Vec(12,Vec(3,UInt(32.W))))
-    val ready  = Input(Vec(12, Bool()))
-}
-
 class IssueQueueIO(ew: Int, dw: Int, num: Int) extends Bundle {
     val enq     = Vec(ew, Flipped(DecoupledIO(new BackendPackage)))
     val deq     = Vec(dw, DecoupledIO(new BackendPackage))
@@ -115,7 +110,7 @@ class IssueQueueIO(ew: Int, dw: Int, num: Int) extends Bundle {
     val stLeft  = Output(UInt(log2Ceil(num).W))
     val flush   = Input(Bool())
     val dbg     = Output(new IssueQueueDBGIO)
-    val se      = new IsSEIO
+    val se      = Flipped(new SEISSIO)
 }
 
 class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Module {
@@ -132,6 +127,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
         VecInit.fill(n)(VecInit.fill(len)(0.U.asTypeOf(new IQEntry(num))))
     )
     io.se.isCalStream := VecInit.fill(12)(false.B)
+    io.se.useBuffer := VecInit.fill(12)(VecInit.fill(3)(false.B))
     io.se.iterCnt := VecInit.fill(12)(VecInit.fill(3)(0.U(32.W)))
 
     val fList = Module(new ClusterIndexFIFO(
@@ -175,6 +171,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
         qq.zipWithIndex.foreach { case (e, j) =>      // j 是二维索引 (列号)
             val flatIdx = i * iq(0).size + j
             io.se.isCalStream(flatIdx) := e.item.isCalStream
+            io.se.useBuffer(flatIdx) := e.item.sinfo.useBuffer
             io.se.iterCnt(flatIdx) := e.item.iterCnt
             e := e.stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem, io.se.ready, flatIdx.U)
         }
@@ -184,6 +181,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
         when(io.enq(i).valid && fList.io.deq(0).valid){
             val flatIdx = freeIQ(i) * iq(0).size.U + freeItem(i)
             io.se.isCalStream(flatIdx) := io.enq(i).bits.isCalStream
+            io.se.useBuffer(flatIdx) := io.enq(i).bits.sinfo.useBuffer
             io.se.iterCnt(flatIdx) := io.enq(i).bits.iterCnt
             iq(freeIQ(i))(freeItem(i)) := (new IQEntry(len))(
                 enqEntries(i), 
