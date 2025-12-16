@@ -22,7 +22,7 @@ class SEWBIO extends Bundle {
 class SEISSIO extends Bundle {
     val isCalStream = Input(Vec(arithNiq,Bool()))
     val useBuffer = Input(Vec(arithNiq,Vec(3,Bool())))
-    val iterCnt = Input(Vec(arithNiq,UInt(32.W)))
+    val iterCnt = Input(Vec(arithNiq,Vec(3,UInt(32.W))))
     val ready  = Output(Vec(arithNiq, Bool()))
 }
 
@@ -138,7 +138,7 @@ class StreamEngine extends Module {
     }
     when(isCfgIRepeat){
         iRepeatCfg(fifoId(Dst)) := cfgIrepeat
-        iRepeatDyn(fifoId(Dst)) := cfgIrepeat
+        iRepeatDyn(fifoId(Dst)) := 0.U
     }
     when(isCfgStream){
         addrCfg(fifoId(Dst)) := addr 

@@ -52,12 +52,12 @@ class Decoder extends Module{
     }
     io.sinfo.state(DONECFG) := isStream
     io.sinfo.state(LDSTRAEM) := io.sinfo.op === CFGLOAD
-    io.isCalStream := isCalStream
     val isCalStream  = isStream && (io.sinfo.op === CALSTREAM || io.sinfo.op === CALSTREAMRD)
     val isCfgStream  = isStream && !isCalStream
     for (i <- 0 until 2) { //rs1 rs2
         io.sinfo.useBuffer(i) := Mux(isCalStream, true.B, false.B)
     }       
+    io.isCalStream := isCalStream
     io.sinfo.useBuffer(2) := Mux(io.sinfo.op === CALSTREAM, true.B, false.B) //rd
 
     /* op: 
