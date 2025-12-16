@@ -158,16 +158,18 @@ class StreamEngine extends Module {
     // dispatch stage
     //TODO：这里的假设是 0，1，2号流分别是RS1，RS2，RD
     for (b <- 0 until 3) {  
-        val sum = iCntMap(b) + PopCount(io.rdIter.fireStreamOp(b))
-        when(sum < iLimitDyn(b)){
-            iCntMap(b) := sum
-        }.elsewhen (iRepeatDyn(b) + 1.U === iRepeatCfg(b)){
-            iCntMap(b) := sum
-            iLimitDyn(b) := iLimitDyn(b) + iLimitCfg(b)
-            iRepeatDyn(b) := 0.U
-        }.otherwise{
-            iCntMap(b) := sum - iLimitCfg(b) //sum - iLimitDyn(b) + iLimitDyn(b) - iLimitCfg(b)
-            iRepeatDyn(b) := iRepeatDyn(b) + 1.U
+        when(PopCount(io.rdIter.fireStreamOp(b)) =/= 0.U){
+            val sum = iCntMap(b) + PopCount(io.rdIter.fireStreamOp(b))
+            when(sum < iLimitDyn(b)){
+                iCntMap(b) := sum
+            }.elsewhen (iRepeatDyn(b) + 1.U === iRepeatCfg(b)){
+                iCntMap(b) := sum
+                iLimitDyn(b) := iLimitDyn(b) + iLimitCfg(b)
+                iRepeatDyn(b) := 0.U
+            }.otherwise{
+                iCntMap(b) := sum - iLimitCfg(b) //sum - iLimitDyn(b) + iLimitDyn(b) - iLimitCfg(b)
+                iRepeatDyn(b) := iRepeatDyn(b) + 1.U
+            }
         }
         io.rdIter.iterCnt(b) := iCntMap(b)
     }

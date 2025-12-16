@@ -11,7 +11,7 @@ object Stream {
     // bits in stream state
     val DONECFG = 0
     val LDSTRAEM = 1
-    val counterWidth = 2
+    val counterWidth = 16
 }
 
 object FifoRole {
