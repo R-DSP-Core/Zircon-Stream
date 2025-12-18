@@ -230,8 +230,8 @@ class StreamEngine extends Module {
     val fifo0Valid = fifoSegEmpty(0).asUInt.orR
     val fifo1Valid = fifoSegEmpty(1).asUInt.orR
     val loadValid  = fifo0Valid | fifo1Valid
-    val loadFifoId = Mux(fifo1Valid && (burstCntMap(1)<burstCntMap(0)), 1.U ,0.U)
-    val loadSegSel = Mux(fifo1Valid && (burstCntMap(1)<burstCntMap(0)), fifoSegEmpty(1).asUInt-1.U  , fifoSegEmpty(0).asUInt-1.U)
+    val loadFifoId = Mux(fifo1Valid && fifo0Valid, Mux((burstCntMap(1)<burstCntMap(0)), 1.U ,0.U), Mux(fifo1Valid, 1.U, 0.U))
+    val loadSegSel = Mux(fifo1Valid && fifo0Valid, Mux((burstCntMap(1)<burstCntMap(0)), fifoSegEmpty(1).asUInt-1.U  , fifoSegEmpty(0).asUInt-1.U), Mux(fifo1Valid,fifoSegEmpty(1).asUInt-1.U  , fifoSegEmpty(0).asUInt-1.U ))
     val loadValidReg      = RegInit(false.B)
     val loadFifoIdReg     = RegInit(0.U(streamBits.W))
     val loadSegSelReg     = RegInit(0.U(log2Ceil(fifoSegNum).W))
@@ -339,7 +339,7 @@ class StreamEngine extends Module {
     when(wFifoWen) {
         Fifo(loadFifoIdRegWB)(wFifoIdx) := wFifoData
         loadreadyMap(loadFifoIdRegWB)(wFifoIdx) := reuseCfg(loadFifoIdRegWB)
-        //printf(p"LOAD FIFO | id = $loadFifoIdReg | idx = $wFifoIdx | value = $wFifoData\n")
+        printf(p"load data = $wFifoData into FIFO $loadFifoIdRegWB[ $wFifoIdx ]  \n")
     }
 
 
