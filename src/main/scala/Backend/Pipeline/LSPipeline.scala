@@ -63,7 +63,7 @@ class LSPipeline extends Module {
 
     /* Issue Stage */
     val instPkgIs = WireDefault(io.iq.instPkg.bits)
-    io.iq.instPkg.ready := !(dc.io.pp.miss || dc.io.pp.sbFull)
+    io.iq.instPkg.ready := !(dc.io.pp.miss || dc.io.pp.sbFull) && !io.se.dc.rreq
     
     def segFlush(instPkg: BackendPackage): Bool = {
         io.cmt.flush || io.wk.rplyIn.replay && (instPkg.prjLpv | instPkg.prkLpv).orR
