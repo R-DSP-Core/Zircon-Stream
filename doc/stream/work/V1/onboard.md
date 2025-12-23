@@ -1,45 +1,31 @@
+## 1. TODO
 
-## gemm实现方案
+### Bug
+1. dispatch那不能简单+1
+2. 分支预测失误恢复
 
-1. A的一行 * B的一列 = C的一数，计算一个C需要B的一列，但B向主存只能按行请求，因此取一列B的过程设计若干行的访问，必须要cache来缓存所有行中未使用的列
-2. A：stream复用 B：cache复用
-3. 过程：
-   1. 先取A的一行
-   2. 然后取B的若干行到cache
-   3. B第一列以流的方式进1个算1个
-   4. A row1 和 B col1算好后，说明B的所有行已经取到cache中
-   5. 接着是主体
-      1. A rowN 与B all col计算
-      2. 取 A row_N+1 into stream
-4. C output_x的计算细节
-   1. 由K个流乘法指令和K个普通累加指令完成，最后写入`通用寄存器`及数组(`cache`)
-
-### 更新（待整理）
-  - 新增若干流指令，梳理清楚软硬件代码
-    - 流计算指令增加 “写rd的指令”，使用funct3与“不写rd指令”区分
-    - 流配置指令增加cfg i-limit i-repeat指令，用于更灵活的支持itermap的增加（递增到某limit回环，直到达到repeat次）
-    - 流配置指令增加cfg tile-stride指令，用于支持gemm-B的 列->列 取数规则
-  - 硬件上，原有逻辑是所有操作数都来自与buffer，且共享同一个itermap；而现在它们不一定来自buffer，且使用各自的itermap。下面称指令的源1 源2和目的操作数分别为op0 op1和op2
-    - dispatch阶段原来是根据fireStream对单个itermap递增，现在要把三个操作数分开，分别递增，分别获取值
-      - 同时不能简单的递增，而是需要根据配置指令进行适当的回环
-    - issue readop writeback阶段：都需要分别考虑三个操作数（三个操作数各自的itercnt && 是否usebuffer）
-
-### TODO
-1. 写一个仿真环境，difftest
-2. 先测一下stream-add吧
-3. 目前做的是16*16，L1放得下数组B
-   1. 其实b数组的tilestride应该还要再配置一个东西，假设buffer X > gemm_k，应该在gemm_k时来到下一列（目前是直接在buffer X来到下一列）
-4. A数组配置可以直接bypass
-
-ITERMAP被改成每个流一个单独的了
+### Other
+1. 说明转置的开销
+2. 功能完善
+   1. Mem
+      1. 单开一个AXI接口比较简单
+      2. 应该连L2?(看看那篇文章)
+         1. 必须连L1的理由可能是: 流读数据时，数据可能被此前通用指令写回过L1，会出现**一致性问题**？
+      3. really Bypass比较难，而且可能没必要？
+   2. 其实b数组的tilestride应该还要再配置一个东西，假设buffer X > gemm_k，应该在gemm_k时来到下一列（目前是直接在buffer X来到下一列）
+      1. **但其实NV 的tensor指令里K就是固定值！**
+3. 性能评估
+   1. 先分析当前 MNK 8 8 32 
+   2. 尝试增大 MN 分析结果（应该先实现Bypass）
+4. 模拟器相关更改：目前模拟器没实现cal_stream_rd指令
 
 ---
 
-## 耦合cache测试
+## 2. Vadd耦合cache测试分析
 1. ![alt text](image-1.png)
 Total cycles: 3382, Total insts: 1571
 这个是不对齐版本下的示意图 每次用到的L2-line 前15个数是上一个大iter取出来的，还可以用，后17个数会L2 miss一次，l1miss一次
-现在的L2不会连续取了，中间间隔的时间组成：
+**现在的L2不会连续取了**，中间间隔的时间组成：
 miss前：A数组一个个读前15个数
 触发miss
 miss后：l2miss填好自己之后，才能一个一个的向stream发（多了发数周期=15 cycles + l1-miss大概7 cycle）
@@ -48,7 +34,7 @@ miss后：l2miss填好自己之后，才能一个一个的向stream发（多了�
 
 ---
 
-## FFT实现方案（需要从滴答清单更新至此）
+## 3. FFT实现方案（需要从滴答清单更新至此）
 
 1. 思考点1：奇数偶数流一定要分开
    1. 保持buffer内顺序取数计算的设计原则
