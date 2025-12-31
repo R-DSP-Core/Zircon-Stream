@@ -75,6 +75,7 @@ class SEL2IO extends Bundle {
     val paddr       = Output(UInt(32.W))
     val mtype       = Output(UInt(2.W))
     val miss        = Input(Bool())
+    val dcHazard   = Input(Bool())
     val l2S1Valid   = Input(Bool())
 }
 
@@ -353,7 +354,7 @@ class StreamEngine extends Module {
     val loadSegSelReg     = RegInit(0.U(log2Ceil(fifoSegNum).W))
     val loadAddr = addrDyn(loadFifoIdReg) + loadWordCnt * strideCfg(loadFifoIdReg)
     val loadLastOne = loadWordCnt === (l2LineWord - 1).U 
-    val l2AllowSEReq = !io.l2.miss && !io.l2.l2S1Valid
+    val l2AllowSEReq = !io.l2.miss && !io.l2.l2S1Valid && !io.l2.dcHazard
     val loadDone = loadLastOne && (io.l2.rreq && l2AllowSEReq)
     
     when(io.l2.rreq && l2AllowSEReq){
@@ -388,12 +389,12 @@ class StreamEngine extends Module {
     io.l2.paddr     := loadAddr
     // DCache Stage 1
     val loadD1 = WireDefault(ShiftRegister(
-        Mux(!io.l2.l2S1Valid, 
+        Mux(!io.l2.l2S1Valid && !io.l2.dcHazard, 
         (new loadPPBundle)(loadWordCnt, loadFifoIdReg, loadSegSelReg, loadAddr, loadValidReg, 0.U(32.W)),
         0.U.asTypeOf(new loadPPBundle)),
         1, 
         0.U.asTypeOf(new loadPPBundle), 
-        !io.l2.miss
+        !io.l2.miss 
     ))
     
     // DCache Stage 2

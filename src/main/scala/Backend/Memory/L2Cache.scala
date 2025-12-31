@@ -249,7 +249,7 @@ class L2Cache extends Module {
     val rbufC2     = RegInit(0.U(l2LineBits.W))
     /* stage 1: receive the request, and arbitrate the request */
     io.se.l2S1Valid := io.dc.rreq || io.dc.wreq
-    val s1Rreq     = io.dc.rreq || io.se.rreq
+    val s1Rreq     = io.dc.rreq || (!io.se.l2S1Valid && io.se.rreq)
     val s1Uncache  = Mux(io.se.l2S1Valid, io.dc.uncache, false.B)
     val s1Paddr   = Mux(io.se.l2S1Valid, io.dc.paddr, io.se.paddr)
     val c2s1       = (new L2Channel2Stage1Signal)(Mux(dcHazard, false.B, s1Rreq), Mux(dcHazard, false.B, io.dc.wreq), s1Uncache, s1Paddr, io.dc.mtype, io.dc.wdata, io.se.rreq)
@@ -350,7 +350,8 @@ class L2Cache extends Module {
     // 对于dc和se，其实需要给的miss信号是一致的
     io.ic.miss := missC1 || icHazard
     io.dc.miss := missC2 || dcHazard
-    io.se.miss := missC2 || dcHazard
+    io.se.miss := missC2 
+    io.se.dcHazard := dcHazard
 
     io.dbg(0) := fsmC1.io.dbg
     io.dbg(1) := fsmC2.io.dbg
