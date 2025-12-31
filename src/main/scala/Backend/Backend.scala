@@ -38,6 +38,7 @@ class BackendCommitIO extends Bundle {
 class BackendMemoryIO extends Bundle {
     val l2 = Flipped(new L2DCacheIO)
     val stream = new SEMemIO
+    val sel2 = new SEL2IO
 }
 class BackendDBGIO extends Bundle {
     val rf   = new RegfileDBGIO
@@ -197,7 +198,8 @@ class Backend extends Module {
     io.mem.stream <> stream.io.mem
     mdPP.io.streamPP <> stream.io.pp //cfgstream
     lsPP.io.se.dc   <> stream.io.dc
-
+    io.mem.sel2  <> stream.io.l2
+    
     //Dontcare
     for (k <- 0 until lsuNiq){
         lsIQ.io.se(k).ready := true.B

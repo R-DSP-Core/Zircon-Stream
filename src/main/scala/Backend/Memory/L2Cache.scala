@@ -39,8 +39,9 @@ class L2Channel2Stage1Signal extends Bundle {
     val paddr       = UInt(32.W)
     val mtype       = UInt(2.W)
     val wdata       = UInt(32.W)
+    val seRreq      = Bool()  
 
-    def apply(rreq: Bool, wreq: Bool, uncache: Bool, paddr: UInt, mtype: UInt, wdata: UInt): L2Channel2Stage1Signal = {
+    def apply(rreq: Bool, wreq: Bool, uncache: Bool, paddr: UInt, mtype: UInt, wdata: UInt, seRreq: Bool): L2Channel2Stage1Signal = {
         val c = Wire(new L2Channel2Stage1Signal)
         c.rreq  := rreq
         c.wreq  := wreq
@@ -48,6 +49,7 @@ class L2Channel2Stage1Signal extends Bundle {
         c.paddr := paddr
         c.mtype := mtype
         c.wdata := wdata
+        c.seRreq := seRreq
         c
     }
 }
@@ -120,6 +122,7 @@ class L2CacheIO extends Bundle {
     val ic  = new L2ICacheIO
     val dc  = new L2DCacheIO
     val mem = new MixedVec(Seq(new MemIO(true), new MemIO(false)))
+    val se = Flipped(new SEL2IO)
     val dbg = Output(Vec(2, new L2CacheDBG))
 }
 
@@ -245,7 +248,11 @@ class L2Cache extends Module {
     val wbufC2     = RegInit(0.U.asTypeOf(new WriteBuffer))
     val rbufC2     = RegInit(0.U(l2LineBits.W))
     /* stage 1: receive the request, and arbitrate the request */
-    val c2s1       = (new L2Channel2Stage1Signal)(Mux(dcHazard, false.B, io.dc.rreq), Mux(dcHazard, false.B, io.dc.wreq), io.dc.uncache, io.dc.paddr, io.dc.mtype, io.dc.wdata)
+    io.se.l2S1Valid := io.dc.rreq || io.dc.wreq
+    val s1Rreq     = io.dc.rreq || io.se.rreq
+    val s1Uncache  = Mux(io.se.l2S1Valid, io.dc.uncache, false.B)
+    val s1Paddr   = Mux(io.se.l2S1Valid, io.dc.paddr, io.se.paddr)
+    val c2s1       = (new L2Channel2Stage1Signal)(Mux(dcHazard, false.B, s1Rreq), Mux(dcHazard, false.B, io.dc.wreq), s1Uncache, s1Paddr, io.dc.mtype, io.dc.wdata, io.se.rreq)
     // Segreg1-2
     val c2s2       = ShiftRegister(c2s1, 1, 0.U.asTypeOf(new L2Channel2Stage1Signal), !missC2)
     /* stage 2: search the tag to determine hit or miss, as well as read the data from the line */
@@ -319,10 +326,12 @@ class L2Cache extends Module {
         vldt.wdata(1)   := (if(i < 2) Mux(fsmC2.io.cc.vldInv.get(i), false.B, true.B) else true.B)
     }
 
-    io.dc.rrsp          := !missC2 && c2s3.rreq
+    io.dc.rrsp          := !missC2 && c2s3.rreq && !c2s3.seRreq
     io.dc.rline         := Mux(c2s3.uncache, 0.U((l1LineBits-32).W) ## rbufC2(l2LineBits-1, l2LineBits-32), 
                                         (Mux1H(fsmC2.io.cc.r1H, VecInit(rdataMem, wdataRbuf)).asTypeOf(Vec(l2LineBits / l1LineBits, UInt(l1LineBits.W))))(c2s3.paddr(l2Offset-1, l1Offset)))
     io.dc.wrsp          := !missC2 && c2s3.wreq
+    io.se.rrsp         := !missC2 && c2s3.rreq && c2s3.seRreq
+    io.se.rdata        := (Mux1H(fsmC2.io.cc.r1H, VecInit(rdataMem, wdataRbuf)).asTypeOf(Vec(l2LineBits / 32, UInt(32.W))))(c2s3.paddr(l2Offset-1, 2))
     io.mem(1).rreq      := fsmC2.io.mem.rreq
     io.mem(1).raddr     := tag(c2s3.paddr) ## index(c2s3.paddr) ## Mux(c2s3.uncache, offset(c2s3.paddr), 0.U(l2Offset.W))
     io.mem(1).rlen      := Mux(c2s3.uncache, 0.U, (l2LineBits / 32 - 1).U)
@@ -338,8 +347,10 @@ class L2Cache extends Module {
     /* related check: */
     dcHazard := c2s3.wreq
 
+    // 对于dc和se，其实需要给的miss信号是一致的
     io.ic.miss := missC1 || icHazard
     io.dc.miss := missC2 || dcHazard
+    io.se.miss := missC2 || dcHazard
 
     io.dbg(0) := fsmC1.io.dbg
     io.dbg(1) := fsmC2.io.dbg
