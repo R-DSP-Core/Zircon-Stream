@@ -1,12 +1,11 @@
-# Ziron-2024
+# Ziron-Stream
 
-Zircon-2024是一款RISC-V处理器，由Zircon项目迭代而来。
+Zircon-Stream是一款RISC-V处理器，由Zircon-2024 fork而来。
 
 ## 文档
 
-## 处理器架构
-
-[处理器架构主页](https://mazirui2001.github.io/Zircon-2024-Web/Zircon2024/)
+[流式访存文档](doc/stream/)
+[profiling工具文档](doc/profiling/)
 
 ## 目录概览
 
@@ -50,10 +49,10 @@ make verilog
 ### 运行测试
 
 * Zircon-2024采用Verilator作为后端仿真器，因此请确保在系统中安装了Verilator。
-
 * 在RV-Software任意测试下，执行：
-    ```bash
-    make run
-    ```
-    注意：RV-Software的编译需要依赖支持riscv32的clang编译器和对应的lld链接器。
-* 运行每一个测试后，仿真环境都会自动生成一份处理器性能报告，位于`test_run_dir/reports/`目录下。
+
+  ```bash
+  make run
+  ```
+  注意：RV-Software的编译需要依赖支持riscv32的clang编译器和对应的lld链接器。
+* 运行每一个测试后，仿真环境都会自动生成一份处理器性能报告，位于 `test_run_dir/reports/`目录下。
