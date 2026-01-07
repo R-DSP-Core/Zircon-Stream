@@ -1,6 +1,6 @@
 [submodule "RV-Software"]
 	path = RV-Software
-	url = ./RV-Software
+	url = https://github.com/luot-ai/RV-Software.git
 [submodule "ZirconSim"]
 	path = ZirconSim
-	url = ./ZirconSim
+	url = https://github.com/luot-ai/ZirconSim.git

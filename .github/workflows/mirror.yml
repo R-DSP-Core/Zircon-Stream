@@ -1,0 +1,20 @@
+name: Mirror to Team Repo
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # 每6小时
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取所有历史
+
+      - name: Mirror push to team repo
+        run: |
+          git remote add team https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/R-DSP-Core/Zircon-Stream.git
+          git push --mirror team
