@@ -1,8 +1,6 @@
 RV-Software-old/*
 doc/stream/paper/*
-doc/stream/work/details.md
-doc/stream/work/onboard.md
-doc/stream/work/timeline.md
+
 ### Project Specific stuff
 test_run_dir/
 verilog/
