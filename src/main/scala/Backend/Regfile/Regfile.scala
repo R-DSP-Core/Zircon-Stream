@@ -31,18 +31,24 @@ class RegfileSingleIO extends Bundle{
 }
 
 class Regfile extends Module {
-    val io  = IO(Vec(nis, new RegfileSingleIO))
+        val io  = IO(new Bundle {
+        val original = Vec(nis, new RegfileSingleIO)
+        val tcmwr = new RegfileWRIO
+    })
     // val predictIO = IO(new RegfilePredictIO)
     val dbg = IO(new RegfileDBGIO)
 
     val regfile = RegInit(VecInit.tabulate(npreg)(i => 0.U(32.W)))
 
     for(i <- 0 until nis){
-        io(i).rd.prjData := WFirstRead(regfile(io(i).rd.prj), io(i).rd.prj, io.map(_.wr.prd), io.map(_.wr.prdData), io.map(_.wr.prdVld))
-        io(i).rd.prkData := WFirstRead(regfile(io(i).rd.prk), io(i).rd.prk, io.map(_.wr.prd), io.map(_.wr.prdData), io.map(_.wr.prdVld))
-        when(io(i).wr.prdVld){
-            regfile(io(i).wr.prd) := io(i).wr.prdData
+        io.original(i).rd.prjData := WFirstRead(regfile(io.original(i).rd.prj), io.original(i).rd.prj, io.original.map(_.wr.prd), io.original.map(_.wr.prdData), io.original.map(_.wr.prdVld))
+        io.original(i).rd.prkData := WFirstRead(regfile(io.original(i).rd.prk), io.original(i).rd.prk, io.original.map(_.wr.prd), io.original.map(_.wr.prdData), io.original.map(_.wr.prdVld))
+        when(io.original(i).wr.prdVld){
+            regfile(io.original(i).wr.prd) := io.original(i).wr.prdData
         }
+    }
+    when(io.tcmwr.prdVld){
+        regfile(io.tcmwr.prd) := io.tcmwr.prdData
     }
     // predictIO.praData := ShiftRegister(regfile(predictIO.pra), 1, 0.U, true.B)
     dbg.rf := regfile

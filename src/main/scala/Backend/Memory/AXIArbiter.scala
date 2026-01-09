@@ -50,6 +50,7 @@ class AXIIO extends Bundle {
 class AXIArbiterIO extends Bundle {
     val l2  = MixedVec(Seq(Flipped(new MemIO(true)), Flipped(new MemIO(false))))
     val stream = Flipped(new SEMemIO)
+    val tcm = Flipped(new TbMemIO)
     // for Main Memory
     val axi = new AXIIO
     val dbg = new AXIDebugIO
@@ -68,6 +69,9 @@ class AXIArbiter extends Module{
     io.stream.rlast:= false.B
     io.stream.rdata:= io.axi.rdata
 
+    io.tcm.rrsp  := false.B
+    io.tcm.rlast := false.B
+    io.tcm.rdata := io.axi.rdata
 
     io.axi.araddr  := io.l2(0).raddr
     io.axi.arburst := 1.U
@@ -85,13 +89,18 @@ class AXIArbiter extends Module{
     io.dbg.addr := 0.U(32.W)
 
     // read FSM
-    val rIdle :: rIar :: rIr :: rDar :: rDr :: rSar :: rSr :: Nil = Enum(7)
+    val rIdle :: rIar :: rIr :: rDar :: rDr :: rSar :: rSr :: rTar :: rTr :: Nil = Enum(9)
 
     val rState = RegInit(rIdle)
     switch(rState){
         is(rIdle){
             // idle state
-            rState := Mux(io.stream.rreq, rSar, Mux( io.l2(1).rreq, rDar, Mux(io.l2(0).rreq, rIar, rIdle) ))
+            rState := MuxCase(rIdle, Seq(
+                io.stream.rreq     -> rSar,
+                io.l2(1).rreq      -> rDar,
+                io.l2(0).rreq      -> rIar,
+                io.tcm.rreq        -> rTar
+            ))
             io.dbg.rdVldVec := Mux(io.stream.rreq, STREAM, Mux( io.l2(1).rreq, DATA, Mux(io.l2(0).rreq, INST, NONE) )) 
             io.dbg.addr := Mux(io.stream.rreq, io.stream.raddr, Mux(io.l2(1).rreq, io.l2(1).raddr,io.l2(0).raddr))
         }
@@ -140,6 +149,21 @@ class AXIArbiter extends Module{
             io.axi.rready   := true.B
             rState          := Mux(io.axi.rvalid && io.axi.rlast && io.axi.rready, rIdle, rSr)
         }
+        is(rTar){
+            // tcm ar shake hand state
+            io.axi.arvalid := true.B
+            io.axi.araddr  := io.tcm.raddr
+            io.axi.arsize  := io.tcm.rsize
+            io.axi.arlen   := io.tcm.rlen
+            rState         := Mux(io.axi.arready, rTr, rTar)
+        }
+        is(rTr){
+            // tcm read data state
+            io.tcm.rrsp  := io.axi.rvalid
+            io.tcm.rlast := io.axi.rlast
+            io.axi.rready  := true.B
+            rState         := Mux(io.axi.rvalid && io.axi.rlast && io.axi.rready, rIdle, rTr)
+        }
     }
 
 
@@ -159,7 +183,7 @@ class AXIArbiter extends Module{
 
 
     // write FSM
-    val wIdle :: wDaw :: wDw :: wDb :: wSaw :: wSw :: wSb :: Nil = Enum(7)
+    val wIdle :: wDaw :: wDw :: wDb :: wSaw :: wSw :: wSb :: wTaw :: wTw :: wTb :: Nil = Enum(10)
     val wState = RegInit(wIdle)
 
     // io.l2.foreach{ l2 => l2.wrsp.get := false.B }
@@ -176,11 +200,17 @@ class AXIArbiter extends Module{
     io.axi.wstrb      := io.l2(1).wstrb.get
     io.axi.wvalid     := false.B
     io.axi.bready     := false.B
+
+    io.tcm.wrsp   := false.B
     
     switch(wState){
         is(wIdle){
             // idle state
-            wState := Mux(io.stream.wreq, wSaw , Mux( io.l2(1).wreq.get, wDaw, wIdle ))
+            wState := MuxCase(wIdle, Seq(
+                io.stream.wreq     -> wSaw,
+                io.l2(1).wreq.get  -> wDaw,
+                io.tcm.wreq        -> wTaw
+            ))
         }
         is(wDaw){
             // dcache aw shake hand state
@@ -220,6 +250,28 @@ class AXIArbiter extends Module{
             // stream write response state
             io.axi.bready := true.B
             wState        := Mux(io.axi.bready && io.axi.bvalid, wIdle, wSb)
+        }
+        is(wTaw){
+            // tcm aw shake hand state
+            io.axi.awvalid := true.B
+            io.axi.awaddr     := io.tcm.waddr
+            io.axi.awlen      := io.tcm.wlen
+            io.axi.awsize     := io.tcm.wsize
+            wState         := Mux(io.axi.awready, wTw, wTaw)
+        }
+        is(wTw){
+            // tcm write data state
+            io.tcm.wrsp := io.axi.wready
+            io.axi.wvalid     := io.tcm.wreq
+            io.axi.wlast      := io.tcm.wlast
+            io.axi.wdata      := io.tcm.wdata
+            io.axi.wstrb      := io.tcm.wstrb
+            wState            := Mux(io.axi.wready && io.axi.wlast && io.axi.wvalid, wTb, wTw)
+        }
+        is(wTb){
+            // tcm write response state
+            io.axi.bready := true.B
+            wState        := Mux(io.axi.bready && io.axi.bvalid, wIdle, wTb)
         }
     }
 }

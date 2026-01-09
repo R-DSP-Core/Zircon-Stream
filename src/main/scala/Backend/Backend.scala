@@ -17,9 +17,9 @@ class BackendDispatchIO extends Bundle {
 class BackendROBIO extends Bundle {
     val ridx  = Output(Vec(arithNissue, new ClusterEntry(nrobQ, ndcd)))
     val rdata = Input(Vec(arithNissue, new ROBEntry))
-    val widx  = Output(Vec(nis, new ClusterEntry(nrobQ, ndcd)))
-    val wen   = Output(Vec(nis, Bool()))
-    val wdata = Output(Vec(nis, new ROBEntry))
+    val widx  = Output(Vec(nisplus, new ClusterEntry(nrobQ, ndcd)))
+    val wen   = Output(Vec(nisplus, Bool()))
+    val wdata = Output(Vec(nisplus, new ROBEntry))
 }
 class BackendBDBIO extends Bundle {
     val ridx  = Output(Vec(arithNissue, new ClusterEntry(nbdbQ, ndcd)))
@@ -57,6 +57,7 @@ class BackendIO extends Bundle {
     val seRIter = Flipped(new SERdIterIO)
     val dbg = new BackendDBGIO
     val dcProfiling = Output(new DCacheProfilingDBG)
+    val tcm = new TbMemIO
 }
 
 class Backend extends Module {
@@ -87,7 +88,7 @@ class Backend extends Module {
 
     // pipeline
     arPP.zipWithIndex.foreach{case(a, i) => 
-        a.rf                <> rf.io(i)
+        a.rf                <> rf.io.original(i)
         a.wk.rplyIn         := rplyBus
         fwd.io.instPkgWB(i) := a.fwd.instPkgWB
         fwd.io.instPkgEX(i) := a.fwd.instPkgEX
@@ -121,7 +122,7 @@ class Backend extends Module {
     mdIQ.io.flush   := io.cmt.flush(3)
 
     // pipeline
-    mdPP.io.rf          <> rf.io(3)
+    mdPP.io.rf          <> rf.io.original(3)
     mdPP.io.wk.rplyIn   := rplyBus
     fwd.io.instPkgWB(3) := mdPP.io.fwd.instPkgWB
     fwd.io.instPkgEX(3) := mdPP.io.fwd.instPkgEX
@@ -148,14 +149,20 @@ class Backend extends Module {
     lsIQ.io.flush   := io.cmt.flush(4)
 
     // pipeline
-    lsPP.io.rf          <> rf.io(4)
+    lsPP.io.rf          <> rf.io.original(4)
+    lsPP.io.tcmwr       <> rf.io.tcmwr
+    io.tcm              <> lsPP.io.tcm
     lsPP.io.wk.rplyIn   := rplyBus
-    fwd.io.instPkgWB(4) := lsPP.io.fwd.instPkgWB
+    fwd.io.instPkgWB(4) := lsPP.io.fwd.instPkgWB(0)
+    fwd.io.instPkgWB(5) := lsPP.io.fwd.instPkgWB(1)
     lsPP.io.cmt.flush   := io.cmt.flush(4)
     lsPP.io.cmt.dc      := io.cmt.sb
-    io.cmt.rob.widx(4)  := lsPP.io.cmt.rob.widx
-    io.cmt.rob.wen(4)   := lsPP.io.cmt.rob.wen
-    io.cmt.rob.wdata(4) := lsPP.io.cmt.rob.wdata
+    io.cmt.rob.widx(4)  := lsPP.io.cmt.rob(0).widx
+    io.cmt.rob.wen(4)   := lsPP.io.cmt.rob(0).wen
+    io.cmt.rob.wdata(4) := lsPP.io.cmt.rob(0).wdata
+    io.cmt.rob.widx(5)  := lsPP.io.cmt.rob(1).widx
+    io.cmt.rob.wen(5)   := lsPP.io.cmt.rob(1).wen
+    io.cmt.rob.wdata(5) := lsPP.io.cmt.rob(1).wdata
 
     wakeBus(2) := VecInit(
         arPP(0).wk.wakeRF,

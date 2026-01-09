@@ -88,6 +88,7 @@ object RegisterFile{
 object Issue{
     val niq          = 3
     val nis          = 5
+    val nisplus      = 6
     val arithNiq     = 12
     val arithNissue  = 3
     val muldivNiq    = 4
@@ -174,6 +175,21 @@ object Cache{
     val l2LineBits    = l2Line * 8
     val l2LineWord = l2Line >> 2
 }
+
+object TCM{
+    val tcmBaseAddress = 0x2000_0000
+    val tcmBanknums    = 8
+    val tcmBank        = log2Ceil(tcmBanknums)
+    val tcmByte        = 2
+    val tcmLine        = 1 << tcmByte
+    val tcmIndex       = 7
+    val tcmIndexNum    = 1 << tcmIndex
+    val tcmTagLength   = 32 - tcmByte - tcmIndex
+    val tcmAddressTag  = tcmBaseAddress >> (tcmByte + tcmIndex)
+    val tcmsAddrTag    = tcmBaseAddress >> 20
+    val tcmBurstAddr   = 0x2001_0000
+}
+
 object TLB{
     val ENTRYNUM = 16
 }

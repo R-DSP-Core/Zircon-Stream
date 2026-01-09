@@ -3,7 +3,7 @@ import chisel3.util._
 import ZirconConfig.Issue._
 
 class ForwardIO extends Bundle {
-    val instPkgWB  = Input(Vec(nis, new BackendPackage))
+    val instPkgWB  = Input(Vec(nisplus, new BackendPackage))
     // only forward arith pipeline
     val instPkgEX  = Input(Vec(4, new BackendPackage))
     val src1Fwd    = Vec(4, Decoupled(UInt(32.W)))

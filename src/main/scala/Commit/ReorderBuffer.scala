@@ -99,7 +99,7 @@ class ReorderBufferIO extends Bundle{
 class ReorderBuffer extends Module{
     val io = IO(new ReorderBufferIO)
 
-    val q = Module(new ClusterIndexFIFO(new ROBEntry, nrob, ndcd, ncommit, arithNissue, nis))
+    val q = Module(new ClusterIndexFIFO(new ROBEntry, nrob, ndcd, ncommit, arithNissue, nisplus))
     // 1. frontend: in dispatch stage, each instruction will enqueue into the ROB
     q.io.enq.zip(io.dsp.enq).foreach{case (enq, dsp) => enq <> dsp }
     io.dsp.enqIdx.zip(q.io.enqIdx).foreach{ case(idx, enq) =>

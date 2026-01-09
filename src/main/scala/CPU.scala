@@ -28,7 +28,6 @@ class CPU(sim: Boolean = false) extends Module {
     val dsp = Module(new Dispatch)
     val bke = Module(new Backend)
     val cmt = Module(new Commit)
-    io.dbg.get.dcProfiling := bke.io.dcProfiling
     val l2  = Module(new L2Cache)
     val arb = Module(new AXIArbiter)
 
@@ -46,6 +45,7 @@ class CPU(sim: Boolean = false) extends Module {
     bke.io.mem.sel2 <> l2.io.se
     arb.io.l2  <> l2.io.mem
     arb.io.stream <> bke.io.mem.stream
+    arb.io.tcm <> bke.io.tcm
     arb.io.axi <> io.axi
 
 
@@ -61,5 +61,6 @@ class CPU(sim: Boolean = false) extends Module {
         io.dbg.get.bke <> bke.io.dbg
         io.dbg.get.l2  <> l2.io.dbg
         io.dbg.get.axi <> arb.io.dbg 
+        io.dbg.get.dcProfiling := bke.io.dcProfiling
     }
 }
