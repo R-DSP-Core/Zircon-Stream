@@ -71,7 +71,7 @@ class DTCMBurst extends Module {
     val io = IO(new TcmBurstIO)
 
     //SRAM
-    val mem = Module(new DTCMArbiter(tcmLine, 8, tcmIndexNum * tcmBank)).io
+    val mem = Module(new DTCMArbiter(tcmLine, 8, tcmIndexNum)).io
     io.mem <> mem.mem
 
     //Utils
