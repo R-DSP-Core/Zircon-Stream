@@ -223,7 +223,8 @@ class StreamEngine extends Module {
     }
 
     // dispatch stage
-    //TODO：这里的假设是 0，1，2号流分别是RS1，RS2，RD
+    //TODO：这里的假设是 0，1，2号分别是RS1，RS2，RD
+    //TODO：不可以只给一个itercnt
     for (b <- 0 until 3) {  
         when(PopCount(io.rdIter.fireStreamOp(b)) =/= 0.U){
             val sum = iCntMap(b) + PopCount(io.rdIter.fireStreamOp(b))
@@ -321,7 +322,6 @@ class StreamEngine extends Module {
         val isWrap = (burstCntMap(loadFifoIdAXIReg) + 1.U) % lengthMap(loadFifoIdAXIReg) === 0.U
         when(isWrap)
         {
-            //printf(p"id=$loadFifoIdAXIReg, burstCnt=$burstCntMap, oIterCntMap=$oIterCntMap, outerIterMap=$outerIterMap\n")
             oIterCntMap(loadFifoIdAXIReg) :=oIterCntMap(loadFifoIdAXIReg) + 1.U
         }
         addrDyn(loadFifoIdAXIReg)     := Mux(isWrap, addrCfg(loadFifoIdAXIReg), addrDyn(loadFifoIdAXIReg) + l2Line.U)
