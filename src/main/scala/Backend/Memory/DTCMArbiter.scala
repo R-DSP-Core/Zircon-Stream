@@ -43,8 +43,9 @@ class DTCMArbiter(
 
     })
 
-  // 用 SyncReadMem 模拟伪双口
-  val mem = SyncReadMem(depth, Vec(nByte, UInt(byteWidth.W)))
+  // // 用 SyncReadMem 模拟伪双口
+  // val mem = SyncReadMem(depth, Vec(nByte, UInt(byteWidth.W)))
+  val mem = Module(new XilinxTrueDualPortReadFirstByteWrite1ClockRam(nByte, byteWidth, depth)).io
 
   val memAddr   = RegInit(0.U(32.W))
   val tcmAddr   = RegInit(0.U(32.W))
@@ -97,7 +98,13 @@ class DTCMArbiter(
   val taddr = Mux(ctrl(2),tcmAddr + rev << 2,tcmAddr + idx << 2)
 
   val memOut  = WireDefault(0.U((nByte * byteWidth).W))
-  memOut := mem.read(Mux(memEna,io.addra,taddr),(memEna || ent2f)).asUInt
+  // memOut := mem.read(Mux(memEna,io.addra,taddr),(memEna || ent2f)).asUInt
+  memOut    := mem.douta
+  mem.clka  := clock
+  mem.addra := Mux(memEna,io.addra,taddr)
+  mem.ena   := memEna || ent2f
+  mem.dina  := 0.U
+  mem.wea   := 0.U
 
   val ctrlOutReg = Mux(io.addra === "h10".U, status, 0.U)
 
@@ -109,7 +116,7 @@ class DTCMArbiter(
 
   //control register writes
   when(ctrlRegWrite && !status){
-    switch(io.addra(7,0)){
+    switch(io.addra(log2Ceil(depth) - 1,0)){
       is("h00".U) { memAddr := io.dina }
       is("h04".U) { tcmAddr := io.dina }
       is("h08".U) { length  := io.dina }
@@ -117,11 +124,15 @@ class DTCMArbiter(
     }
   }
 
-  val dataVec = VecInit(io.dinb(7,0),io.dinb(15,8),io.dinb(23,16),io.dinb(31,24))
-  val fifoVec = VecInit(fifo.io.deq.bits(7,0),fifo.io.deq.bits(15,8),fifo.io.deq.bits(23,16),fifo.io.deq.bits(31,24))
-  when(memEnb || enf2t) {
-    mem.write(Mux(memEnb,io.addrb,taddr), Mux(memEnb,dataVec,fifoVec), Mux(memEnb,io.web,"b1111".U).asBools)
-  }
+  // val dataVec = VecInit(io.dinb(7,0),io.dinb(15,8),io.dinb(23,16),io.dinb(31,24))
+  // val fifoVec = VecInit(fifo.io.deq.bits(7,0),fifo.io.deq.bits(15,8),fifo.io.deq.bits(23,16),fifo.io.deq.bits(31,24))
+  // when(memEnb || enf2t) {
+  //   mem.write(Mux(memEnb,io.addrb,taddr), Mux(memEnb,dataVec,fifoVec), Mux(memEnb,io.web,"b1111".U).asBools)
+  // }
+  mem.addrb := Mux(memEnb,io.addrb,taddr)
+  mem.enb   := memEnb || enf2t
+  mem.dinb  := Mux(memEnb,io.dinb,fifo.io.deq.bits)
+  mem.web   := Mux(memEnb,io.web,"b1111".U)
 
   //---fifo
   fifo.io.enq.valid := false.B
