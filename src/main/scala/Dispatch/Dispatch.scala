@@ -12,7 +12,7 @@ import ZirconUtil._
 // 把正确的 iter值带着，进入IQ
 class SERdIterIO extends Bundle{
     val fireStreamOp = Output(Vec(3,Vec(ndcd,Bool())))
-    val iterCnt = Input(Vec(3,UInt(32.W)))
+    val iterCnt =       Input(Vec(3,Vec(ndcd,UInt(32.W))))
 }
 
 
@@ -33,7 +33,6 @@ class Dispatch extends Module {
     val cycleReg = RegInit(0.U(64.W))
     cycleReg     := cycleReg + 1.U
 
-    // TODO
     for (i <- 0 until ndcd) {
         val instBits = io.fte.instPkg(i).bits
         val useBuffer = instBits.sinfo.useBuffer
@@ -45,10 +44,12 @@ class Dispatch extends Module {
     
     val seIter = WireInit(VecInit.fill(3)(VecInit.fill(ndcd)(0.U(32.W))))
     for (b <- 0 until 3) {
-        seIter(b)(0) := io.seRIter.iterCnt(b)
-        for (i <- 1 until ndcd) {
-            seIter(b)(i) := Mux(io.seRIter.fireStreamOp(b)(i-1), seIter(b)(i-1) + 1.U, seIter(b)(i-1))
-        } 
+        val fire = io.seRIter.fireStreamOp(b)
+        val iter = io.seRIter.iterCnt(b)
+        val idx = fire.scanLeft(0.U(ndcd.W))(_ + _).dropRight(1)
+        for (i <- 0 until ndcd) {
+          seIter(b)(i) := iter(idx(i))
+        }
     }
     
     // ready board

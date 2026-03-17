@@ -5,6 +5,7 @@ import ZirconConfig.Cache._
 import ZirconConfig.EXEOp._
 import ZirconConfig.FifoRole._
 import ZirconConfig.Issue._
+import ZirconConfig.Decode._
 
 class SERFIO extends Bundle {
     val iterCnt = Input(Vec(3,UInt(32.W)))
@@ -239,7 +240,10 @@ class StreamEngine extends Module {
                 iRepeatDyn(b) := iRepeatDyn(b) + 1.U
             }
         }
-        io.rdIter.iterCnt(b) := iCntMap(b)
+        for (i <- 0 until ndcd){
+            val sum = iCntMap(b) + i.U
+            io.rdIter.iterCnt(b)(i) := Mux(sum < iLimitDyn(b), sum , Mux(iRepeatDyn(b) + 1.U === iRepeatCfg(b), sum, sum - iLimitCfg(b))) 
+        }
     }
 
     // Issue stage
