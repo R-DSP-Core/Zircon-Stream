@@ -42,8 +42,8 @@ class PreDecoder extends Module {
     val isStream = inst(6,0)===0x0b.U//0001011
     val streamOp = inst(14,12) 
     val stRdVld = isStream && (streamOp === CALSTREAMRD)
-    val stRkVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || streamOp === CFGREUSE || streamOp === CALRJRKSTREAM )
-    val stRjVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || streamOp === CFGREUSE || streamOp === CALRJRKSTREAM )
+    val stRkVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || streamOp === CFGREUSE || streamOp === CALRJRKSTREAMPP )
+    val stRjVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || streamOp === CFGREUSE || streamOp === CALRJRKSTREAMPP )
 
     // rd
     val rdVld = (inst(3, 0) === 0x3.U && !(
