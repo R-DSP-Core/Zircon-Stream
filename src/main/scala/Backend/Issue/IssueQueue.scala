@@ -129,6 +129,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
     for (i <- 0 until num){
         io.se(i).isCalStream := false.B  
         io.se(i).useBuffer := VecInit.fill(3)(false.B)
+        io.se(i).usePPBuffer := false.B
         io.se(i).iterCnt := VecInit.fill(3)(0.U(32.W))    
     }
 
@@ -174,6 +175,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             val flatIdx = i * iq(0).size + j
             io.se(flatIdx).isCalStream:= e.item.isCalStream
             io.se(flatIdx).useBuffer := e.item.sinfo.useBuffer
+            io.se(flatIdx).usePPBuffer := e.item.sinfo.usePPBuffer.asUInt.orR
             io.se(flatIdx).iterCnt := e.item.iterCnt
             e := e.stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem, VecInit(io.se.map(_.ready)), flatIdx.U)
         }
@@ -184,6 +186,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             val flatIdx = freeIQ(i) * iq(0).size.U + freeItem(i)
             io.se(flatIdx).isCalStream := io.enq(i).bits.isCalStream
             io.se(flatIdx).useBuffer := io.enq(i).bits.sinfo.useBuffer
+            io.se(flatIdx).usePPBuffer := io.enq(i).bits.sinfo.usePPBuffer.asUInt.orR
             io.se(flatIdx).iterCnt := io.enq(i).bits.iterCnt
             iq(freeIQ(i))(freeItem(i)) := (new IQEntry(len))(
                 enqEntries(i), 

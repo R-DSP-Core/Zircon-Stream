@@ -189,6 +189,7 @@ class ArithPipeline extends Module {
 
     io.sewb.wvalid  := instPkgWB.isCalStream
     io.sewb.useBuffer := instPkgWB.sinfo.useBuffer
+    io.sewb.usePPBuffer := instPkgWB.sinfo.usePPBuffer.asUInt.orR
     io.sewb.iterCnt := instPkgWB.iterCnt
     io.sewb.wdata   :=  instPkgWB.rfWdata
     // forward

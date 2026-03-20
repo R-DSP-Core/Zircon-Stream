@@ -16,12 +16,14 @@ class SERFIO extends Bundle {
 class SEWBIO extends Bundle {
     val wvalid = Input(Bool())
     val useBuffer = Input(Vec(3,Bool()))
+    val usePPBuffer = Input(Bool())
     val iterCnt = Input(Vec(3,UInt(32.W)))
     val wdata  = Input(UInt(32.W))
 }
 
 class SEISSIO extends Bundle {
     val isCalStream = Input(Bool())
+    val usePPBuffer = Input(Bool())
     val useBuffer = Input(Vec(3,Bool()))
     val iterCnt = Input(Vec(3,UInt(32.W)))
     val ready  = Output(Bool())
@@ -296,7 +298,10 @@ class StreamEngine extends Module {
             io.rdIter.iterCntPP(b)(i) := nextIndex(sum, ppLimitDyn(b), ppStrideDyn(b), stageDyn(b), stageLimitCfg(b), ppBaseCfg(b))
         }
     }
-    
+
+    def getPP( ppRaw: UInt ): (UInt,UInt) = {
+        ( ppRaw(5), Cat(ppRaw(6), ppRaw(4,0)) )
+    }
 
     // Issue stage
     for (i <- 0 until 16) {
@@ -304,10 +309,12 @@ class StreamEngine extends Module {
         for (b <- 0 until 3) {
             issWordIdx(b) := (io.iss(i).iterCnt(b) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
         }
+        val (ppId, ppIdx) = getPP(issWordIdx(2))
+        val ppRdy = !io.iss(i).usePPBuffer || loadreadyMap(ppId)(ppIdx) === 0.U
         io.iss(i).ready :=  io.iss(i).isCalStream &
                           (loadreadyMap(0)(issWordIdx(0)) =/= 0.U || !io.iss(i).useBuffer(0)) &
                           (loadreadyMap(1)(issWordIdx(1)) =/= 0.U || !io.iss(i).useBuffer(1)) &
-                          (!storereadyMap(issWordIdx(2)) || !io.iss(i).useBuffer(2))
+                          (!storereadyMap(issWordIdx(2)) || !io.iss(i).useBuffer(2)) & ppRdy
     }
 
     // ReadOp stage + writeback stage
@@ -329,6 +336,12 @@ class StreamEngine extends Module {
                 val wbWordIdx = (io.wb(i).iterCnt(2) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
                 Fifo(2)(wbWordIdx) := io.wb(i).wdata
                 storereadyMap(wbWordIdx) := true.B 
+            }
+            when(io.wb(i).usePPBuffer){
+                val (ppId, ppIdx) = getPP(io.wb(i).iterCnt(2))
+                Fifo(ppId)(ppIdx) := io.wb(i).wdata
+                assert(loadreadyMap(ppId)(ppIdx) === 0.U, "pp buffer should be empty")
+                loadreadyMap(ppId)(ppIdx) := reuseCfg(ppId)
             }
         }
     }

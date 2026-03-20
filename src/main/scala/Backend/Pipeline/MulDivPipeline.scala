@@ -163,5 +163,6 @@ class MulDivPipeline extends Module {
     io.sewb.useBuffer := instPkgWB.sinfo.useBuffer
     io.sewb.iterCnt := instPkgWB.iterCnt
     io.sewb.wdata   :=  instPkgWB.rfWdata
+    io.sewb.usePPBuffer := instPkgWB.sinfo.usePPBuffer.asUInt.orR
 }
 
