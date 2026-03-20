@@ -144,9 +144,9 @@ class StreamEngine extends Module {
 
     val ppCntMap = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W)))   
     val ppBaseCfg = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W))) 
-    val ppStrideDyn = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W)))
+    val ppStrideDyn = RegInit(VecInit.fill(2)(2.U(ppCntWidth.W)))//TODO
     val ppLimitDyn = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W)))
-    val stageLimitCfg = RegInit(VecInit.fill(2)(0.U(stageWidth.W))) 
+    val stageLimitCfg = RegInit(VecInit.fill(2)(5.U(stageWidth.W)))//TODO
     val stageDyn = RegInit(VecInit.fill(2)(0.U(stageWidth.W))) 
 
     val iCntMap = RegInit(VecInit.fill(streamNum)(0.U(32.W)))    //fifo_id -> itercnt
@@ -272,6 +272,11 @@ class StreamEngine extends Module {
       )
     }
 
+    //TODO:CFG
+    ppBaseCfg(0) := 0.U
+    ppBaseCfg(1) := 2.U
+    ppLimitDyn(0) := 2.U
+    ppLimitDyn(1) := 4.U
     // b = 0，流流流；b = 1，寄寄流
     for (b <- 0 until 2) {
         val ppInstNum = PopCount(io.rdIter.fireStreamOpPP(b))
@@ -300,7 +305,7 @@ class StreamEngine extends Module {
     }
 
     def getPP( ppRaw: UInt ): (UInt,UInt) = {
-        ( ppRaw(5), Cat(ppRaw(6), ppRaw(4,0)) )
+        ( 0.U ## ppRaw(5), Cat(ppRaw(6), ppRaw(4,0)) )
     }
 
     // Issue stage
@@ -309,7 +314,7 @@ class StreamEngine extends Module {
         for (b <- 0 until 3) {
             issWordIdx(b) := (io.iss(i).iterCnt(b) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
         }
-        val (ppId, ppIdx) = getPP(issWordIdx(2))
+        val (ppId, ppIdx) = getPP(io.iss(i).iterCnt(2))
         val ppRdy = !io.iss(i).usePPBuffer || loadreadyMap(ppId)(ppIdx) === 0.U
         io.iss(i).ready :=  io.iss(i).isCalStream &
                           (loadreadyMap(0)(issWordIdx(0)) =/= 0.U || !io.iss(i).useBuffer(0)) &
