@@ -14,6 +14,9 @@ object Stream {
     val LDSTRAEM = 1
     val LDAXISTREAM = 2
     val counterWidth = 16
+
+    val stageWidth = 4 // assum at most 12 stages
+    val ppCntWidth = 7 // at most 64 cnt
 }
 
 object FifoRole {

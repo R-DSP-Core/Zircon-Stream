@@ -139,7 +139,13 @@ class LoadSelect extends Module {
 
 class StreamEngine extends Module {
     val io = IO(new StreamEngineIO)
-    
+
+    val ppCntMap = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W)))   
+    val ppBaseCfg = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W))) 
+    val ppStrideDyn = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W)))
+    val ppLimitDyn = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W)))
+    val stageLimitCfg = RegInit(VecInit.fill(2)(0.U(stageWidth.W))) 
+    val stageDyn = RegInit(VecInit.fill(2)(0.U(stageWidth.W))) 
 
     val iCntMap = RegInit(VecInit.fill(streamNum)(0.U(32.W)))    //fifo_id -> itercnt
     val iLimitCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_limit
@@ -225,7 +231,6 @@ class StreamEngine extends Module {
 
     // dispatch stage
     //TODO：这里的假设是 0，1，2号分别是RS1，RS2，RD
-    //TODO：不可以只给一个itercnt
     for (b <- 0 until 3) {  
         when(PopCount(io.rdIter.fireStreamOp(b)) =/= 0.U){
             val sum = iCntMap(b) + PopCount(io.rdIter.fireStreamOp(b))
@@ -243,6 +248,33 @@ class StreamEngine extends Module {
         for (i <- 0 until ndcd){
             val sum = iCntMap(b) + i.U
             io.rdIter.iterCnt(b)(i) := Mux(sum < iLimitDyn(b), sum , Mux(iRepeatDyn(b) + 1.U === iRepeatCfg(b), sum, sum - iLimitCfg(b))) 
+        }
+    }
+
+    for (b <- 0 until 2) {
+        val ppInstNum = PopCount(io.rdIter.fireStreamOpPP(b))
+        when(ppInstNum =/= 0.U){
+            val sum = ppCntMap(b) + ppInstNum
+            when (sum < ppLimitDyn(b)){ //inner most loop
+                ppCntMap(b) := sum
+            }.elsewhen (ppStrideDyn(b) + ppLimitDyn(b) < 64.U){  // inner stage
+                assert(ppInstNum <= stageDyn(b), "can't overflow stride")
+                ppCntMap(b) := sum + ppStrideDyn(b) 
+                ppLimitDyn(b) := ppLimitDyn(b) + ppStrideDyn(b) << 1
+            }.elsewhen( stageDyn(b) + 1.U < stageLimitCfg(b)){  // stage++, inner block
+                val nextStage = stageDyn(b) + 1.U
+                val nextBase = ppBaseCfg(b) << nextStage
+                val nextStride = ppStrideDyn(b) << 1
+                ppStrideDyn(b)     := nextStride
+                ppLimitDyn(b)   := nextBase +  nextStride
+                ppCntMap(b)     := nextBase + (sum - ppLimitDyn(b))
+                stageDyn(b)     := stageDyn(b) + 1.U
+            }.otherwise{ //block++
+                ppStrideDyn(b) := 2.U
+                ppLimitDyn(b) := ppBaseCfg(b) + ppStrideDyn(b)
+                ppCntMap(b) := ppBaseCfg(b) + sum - ppLimitDyn(b)
+                stageDyn(b) := 0.U
+            }
         }
     }
 

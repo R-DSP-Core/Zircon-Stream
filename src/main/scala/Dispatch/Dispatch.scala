@@ -13,6 +13,7 @@ import ZirconUtil._
 class SERdIterIO extends Bundle{
     val fireStreamOp = Output(Vec(3,Vec(ndcd,Bool())))
     val iterCnt =       Input(Vec(3,Vec(ndcd,UInt(32.W))))
+    val fireStreamOpPP = Output(Vec(2,Vec(ndcd,Bool())))
 }
 
 
