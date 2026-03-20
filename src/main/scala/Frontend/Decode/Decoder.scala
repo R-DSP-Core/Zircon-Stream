@@ -58,19 +58,19 @@ class Decoder extends Module{
     io.sinfo.state(DONECFG) := isStream
     io.sinfo.state(LDSTRAEM) := io.sinfo.op === CFGLOAD
     io.sinfo.state(LDAXISTREAM) := io.sinfo.op === CFGLOAD && funct7 === 0x1.U
-    val isCalStream  = isStream && (io.sinfo.op === CALSTREAM || io.sinfo.op === CALSTREAMRD || io.sinfo.op === CALSTREAMPP || io.sinfo.op === CALRJRKSTREAM)  
-    val isCalStreamRJRK = isStream && io.sinfo.op === CALRJRKSTREAM
+    val isCalStream  = isStream && (io.sinfo.op === CALSTREAM || io.sinfo.op === CALSTREAMRD || io.sinfo.op === CALSTREAMPP || io.sinfo.op === CALRJRKSTREAMPP)  
+    val isCalStreamRJRK = isStream && io.sinfo.op === CALRJRKSTREAMPP
     val isCalStreamRD = isStream && io.sinfo.op === CALSTREAMRD
-    val isCalStreamNRD = isStream && io.sinfo.op === CALSTREAM
+    val isCalStreamNRD = isCalStream && !isCalStreamRD
     val isCfgStream  = isStream && !isCalStream
     for (i <- 0 until 2) { //rs1 rs2
         io.sinfo.useBuffer(i) := isCalStream && !isCalStreamRJRK
     }       
     io.isCalStream := isCalStream
-    io.sinfo.useBuffer(2) := Mux(io.sinfo.op === CALSTREAM, true.B, false.B) //rd
-    io.sinfo.usePPBuffer(0) := isStream && io.sinfo.op === CALSTREAMPP
-    io.sinfo.usePPBuffer(1) := isStream && io.sinfo.op === CALRJRKSTREAM
-    val isStreamAlu = isCalStream && !(isCalStreamRD && funct7(7) === 0.U ) 
+    io.sinfo.useBuffer(2)   := isStream && io.sinfo.op === CALSTREAM // RD写通用寄存器，另外两条指令写PPbuffer
+    io.sinfo.usePPBuffer(Even) := isStream && io.sinfo.op === CALSTREAMPP
+    io.sinfo.usePPBuffer(Odd) := isStream && io.sinfo.op === CALRJRKSTREAMPP
+    val isStreamAlu = isCalStream && !(isCalStreamRD && funct7 === 0.U ) 
     val isStreamMdu = isStream && !isStreamAlu
 
     /* op: 
@@ -91,7 +91,7 @@ class Decoder extends Module{
         isMem         -> isAtom ## funct3,
         isCalStreamRD -> funct7(3,0), // 目前有乘法和减法
         (isCalStreamNRD && isCalStreamRJRK) -> 6.U, // 目前是or
-        (isCalStreamNRD && !isCalStreamRJRK)   -> 0.U //TODO 目前有加法
+        (isCalStreamNRD && !isCalStreamRJRK)   -> 0.U //TODO 目前是加法
     ))
     io.op := op_6 ## op_5 ## op_4 ## op_3_0
 

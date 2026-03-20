@@ -16,7 +16,10 @@ object Stream {
     val counterWidth = 16
 
     val stageWidth = 4 // assum at most 12 stages
-    val ppCntWidth = 7 // at most 64 cnt
+    val ppCntWidth = 7 + stageWidth // at most 64 * stage
+
+    val Even = 0
+    val Odd = 1
 }
 
 object FifoRole {
@@ -64,7 +67,7 @@ object EXEOp {
     val CFGSTORE = 0x1.U(stInstBits.W)
     val CFGLOAD = 0x5.U(stInstBits.W)
     val CFGREUSE = 0x4.U(stInstBits.W)
-    val CALRJRKSTREAM = 0x6.U(stInstBits.W)
+    val CALRJRKSTREAMPP = 0x6.U(stInstBits.W)
     val CALSTREAMRD = 0x7.U(stInstBits.W)
 
     // funct3 = 0  fucnt7 = 0,1,2

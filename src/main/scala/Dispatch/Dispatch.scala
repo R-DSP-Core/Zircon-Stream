@@ -54,17 +54,18 @@ class Dispatch extends Module {
     }     
     
     val seIter = WireInit(VecInit.fill(3)(VecInit.fill(ndcd)(0.U(32.W))))
+    // src正常根据 01号索引表获取
     for (b <- 0 until 2) {
       seIter(b) := genIter(io.seRIter.fireStreamOp(b), io.seRIter.iterCnt(b))
     }
-    
+    // dst获取需要根据指令类型判断，常规 、Even PP 、OddPP ，对应三组独立的索引更新规则
     val normal = genIter(io.seRIter.fireStreamOp(2), io.seRIter.iterCnt(2))
-    val pp0    = genIter(io.seRIter.fireStreamOpPP(0), io.seRIter.iterCntPP(0))
-    val pp1    = genIter(io.seRIter.fireStreamOpPP(1), io.seRIter.iterCntPP(1))
+    val ppEven    = genIter(io.seRIter.fireStreamOpPP(Even), io.seRIter.iterCntPP(Even))
+    val ppOdd    = genIter(io.seRIter.fireStreamOpPP(Odd), io.seRIter.iterCntPP(Odd))
     for (i <- 0 until ndcd) {
       seIter(2)(i) :=
-        Mux(io.seRIter.fireStreamOpPP(0)(i), pp0(i),
-          Mux(io.seRIter.fireStreamOpPP(1)(i), pp1(i),
+        Mux(io.seRIter.fireStreamOpPP(Even)(i), ppEven(i),
+          Mux(io.seRIter.fireStreamOpPP(Odd)(i), ppOdd(i),
             normal(i)))
     }
 
