@@ -251,32 +251,55 @@ class StreamEngine extends Module {
         }
     }
 
+    def nextIndex(
+      sum: UInt,
+      limit: UInt,
+      stride: UInt,
+      stage: UInt,
+      stageLimit: UInt,
+      base: UInt
+    ): UInt = {
+      Mux(sum < limit, sum,                          // inner
+        Mux(stride + limit < 64.U,                   // stage内跳stride
+          sum + stride,
+          Mux(stage + 1.U < stageLimit,              // stage++
+            (base << (stage + 1.U)) + sum - limit,
+            base + sum - limit                       // block++
+          )
+        )
+      )
+    }
+
+    // b = 0，流流流；b = 1，寄寄流
     for (b <- 0 until 2) {
         val ppInstNum = PopCount(io.rdIter.fireStreamOpPP(b))
         when(ppInstNum =/= 0.U){
             val sum = ppCntMap(b) + ppInstNum
-            when (sum < ppLimitDyn(b)){ //inner most loop
-                ppCntMap(b) := sum
-            }.elsewhen (ppStrideDyn(b) + ppLimitDyn(b) < 64.U){  // inner stage
-                assert(ppInstNum <= stageDyn(b), "can't overflow stride")
-                ppCntMap(b) := sum + ppStrideDyn(b) 
-                ppLimitDyn(b) := ppLimitDyn(b) + ppStrideDyn(b) << 1
-            }.elsewhen( stageDyn(b) + 1.U < stageLimitCfg(b)){  // stage++, inner block
-                val nextStage = stageDyn(b) + 1.U
-                val nextBase = ppBaseCfg(b) << nextStage
-                val nextStride = ppStrideDyn(b) << 1
-                ppStrideDyn(b)     := nextStride
-                ppLimitDyn(b)   := nextBase +  nextStride
-                ppCntMap(b)     := nextBase + (sum - ppLimitDyn(b))
-                stageDyn(b)     := stageDyn(b) + 1.U
-            }.otherwise{ //block++
-                ppStrideDyn(b) := 2.U
-                ppLimitDyn(b) := ppBaseCfg(b) + ppStrideDyn(b)
-                ppCntMap(b) := ppBaseCfg(b) + sum - ppLimitDyn(b)
-                stageDyn(b) := 0.U
+            ppCntMap(b) := nextIndex(sum, ppLimitDyn(b), ppStrideDyn(b), stageDyn(b), stageLimitCfg(b), ppBaseCfg(b))
+            when (sum >= ppLimitDyn(b)){ 
+                when (ppStrideDyn(b) + ppLimitDyn(b) < 64.U) {  
+                    assert(ppInstNum <= stageDyn(b), "can't overflow stride")
+                    ppLimitDyn(b) := ppLimitDyn(b) + ppStrideDyn(b) << 1
+                }.elsewhen( stageDyn(b) + 1.U < stageLimitCfg(b)){  
+                    val nextStage = stageDyn(b) + 1.U
+                    val nextBase = ppBaseCfg(b) << nextStage
+                    val nextStride = ppStrideDyn(b) << 1
+                    ppStrideDyn(b)     := nextStride
+                    ppLimitDyn(b)   := nextBase +  nextStride
+                    stageDyn(b)     := nextStage
+                }.otherwise{ //block++
+                    ppStrideDyn(b) := 2.U
+                    ppLimitDyn(b) := ppBaseCfg(b) + ppStrideDyn(b)
+                    stageDyn(b) := 0.U
+                }
             }
         }
+        for (i <- 0 until ndcd){
+            val sum = ppCntMap(b) + i.U
+            io.rdIter.iterCntPP(b)(i) := nextIndex(sum, ppLimitDyn(b), ppStrideDyn(b), stageDyn(b), stageLimitCfg(b), ppBaseCfg(b))
+        }
     }
+    
 
     // Issue stage
     for (i <- 0 until 16) {

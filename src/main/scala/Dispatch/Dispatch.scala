@@ -14,6 +14,7 @@ class SERdIterIO extends Bundle{
     val fireStreamOp = Output(Vec(3,Vec(ndcd,Bool())))
     val iterCnt =       Input(Vec(3,Vec(ndcd,UInt(32.W))))
     val fireStreamOpPP = Output(Vec(2,Vec(ndcd,Bool())))
+    val iterCntPP =       Input(Vec(2,Vec(ndcd,UInt(32.W))))
 }
 
 
@@ -30,6 +31,11 @@ class Dispatch extends Module {
     val dsp    = Module(new Dispatcher)
     val rboard = Module(new ReadyBoard)
 
+    def genIter( fire: Vec[Bool], iter: Vec[UInt]): Vec[UInt] = {
+      val idx = fire.scanLeft(0.U(ndcd.W))(_ + _).dropRight(1)
+      VecInit((0 until ndcd).map(i => iter(idx(i))))
+    }
+
     // cycle stat
     val cycleReg = RegInit(0.U(64.W))
     cycleReg     := cycleReg + 1.U
@@ -37,22 +43,32 @@ class Dispatch extends Module {
     for (i <- 0 until ndcd) {
         val instBits = io.fte.instPkg(i).bits
         val useBuffer = instBits.sinfo.useBuffer
+        val usePPBuffer = instBits.sinfo.usePPBuffer
         val fireStream = instBits.isCalStream && io.cmt.rob.enq(i).fire
         for (b <- 0 until 3) {
           io.seRIter.fireStreamOp(b)(i) := fireStream && useBuffer(b)
         }
+        for (k <- 0 until 2) {
+          io.seRIter.fireStreamOpPP(k)(i) := fireStream && usePPBuffer(k)
+        }
     }     
     
     val seIter = WireInit(VecInit.fill(3)(VecInit.fill(ndcd)(0.U(32.W))))
-    for (b <- 0 until 3) {
-        val fire = io.seRIter.fireStreamOp(b)
-        val iter = io.seRIter.iterCnt(b)
-        val idx = fire.scanLeft(0.U(ndcd.W))(_ + _).dropRight(1)
-        for (i <- 0 until ndcd) {
-          seIter(b)(i) := iter(idx(i))
-        }
+    for (b <- 0 until 2) {
+      seIter(b) := genIter(io.seRIter.fireStreamOp(b), io.seRIter.iterCnt(b))
     }
     
+    val normal = genIter(io.seRIter.fireStreamOp(2), io.seRIter.iterCnt(2))
+    val pp0    = genIter(io.seRIter.fireStreamOpPP(0), io.seRIter.iterCntPP(0))
+    val pp1    = genIter(io.seRIter.fireStreamOpPP(1), io.seRIter.iterCntPP(1))
+    for (i <- 0 until ndcd) {
+      seIter(2)(i) :=
+        Mux(io.seRIter.fireStreamOpPP(0)(i), pp0(i),
+          Mux(io.seRIter.fireStreamOpPP(1)(i), pp1(i),
+            normal(i)))
+    }
+
+
     // ready board
     rboard.io.pinfo   := io.fte.instPkg.map(_.bits.pinfo)
     rboard.io.wakeBus := io.bke.wakeBus
