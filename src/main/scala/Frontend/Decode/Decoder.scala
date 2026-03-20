@@ -9,6 +9,7 @@ class StreamInfo extends Bundle{
     val op = Output(UInt(stInstBits.W))
     val state = Output(Vec(streamCfgBits,Bool()))
     val useBuffer = Output(Vec(3,Bool()))
+    val usePPBuffer = Output(Vec(2,Bool()))
 }
 
 class DecoderIO extends Bundle{
@@ -42,26 +43,35 @@ class Decoder extends Module{
     val isMuldiv     = inst(6, 0) === 0x33.U && funct7(0) === 1.U
     val isStream     = inst(6, 0) === 0x0b.U
 
-    /*  stream op:
+    /*  STREAM OP:
         4bit指示stream op
         由funct3 funct7共同decode得到
     */
     io.sinfo.op := 0.U(1.W) ## funct3 //默认情况
     when(funct3 === 0x0.U){ //CFGI
         io.sinfo.op := Mux(funct7 === 0x1.U, CFGILIMIT , (Mux(funct7 === 0x2.U, CFGIREPEAT, CFGI)))
+    }.elsewhen(funct3 === 0x2.U){ //CALSTREAM
+        io.sinfo.op := Mux(funct7 === 0x1.U, CALSTREAMPP, CALSTREAM)
+    }.elsewhen(funct3 === 0x3.U){ //CFGSTRIDE
+        io.sinfo.op := Mux(funct7 === 0x1.U, CFGTILESTRIDE, CFGSTRIDE)
     }
     io.sinfo.state(DONECFG) := isStream
     io.sinfo.state(LDSTRAEM) := io.sinfo.op === CFGLOAD
     io.sinfo.state(LDAXISTREAM) := io.sinfo.op === CFGLOAD && funct7 === 0x1.U
-    val isCalStream  = isStream && (io.sinfo.op === CALSTREAM || io.sinfo.op === CALSTREAMRD)
+    val isCalStream  = isStream && (io.sinfo.op === CALSTREAM || io.sinfo.op === CALSTREAMRD || io.sinfo.op === CALSTREAMPP || io.sinfo.op === CALRJRKSTREAM)  
+    val isCalStreamRJRK = isStream && io.sinfo.op === CALRJRKSTREAM
     val isCalStreamRD = isStream && io.sinfo.op === CALSTREAMRD
     val isCalStreamNRD = isStream && io.sinfo.op === CALSTREAM
     val isCfgStream  = isStream && !isCalStream
     for (i <- 0 until 2) { //rs1 rs2
-        io.sinfo.useBuffer(i) := Mux(isCalStream, true.B, false.B)
+        io.sinfo.useBuffer(i) := isCalStream && !isCalStreamRJRK
     }       
     io.isCalStream := isCalStream
     io.sinfo.useBuffer(2) := Mux(io.sinfo.op === CALSTREAM, true.B, false.B) //rd
+    io.sinfo.usePPBuffer(0) := isStream && io.sinfo.op === CALSTREAMPP
+    io.sinfo.usePPBuffer(1) := isStream && io.sinfo.op === CALRJRKSTREAM
+    val isStreamAlu = isCalStream && !(isCalStreamRD && funct7(7) === 0.U ) 
+    val isStreamMdu = isStream && !isStreamAlu
 
     /* op: 
         bit6: indicates src1 source, 0-reg 1-pc, or indicates store, 1-store, 0-not
@@ -79,8 +89,9 @@ class Decoder extends Module{
         isJal         -> JAL(3, 0),
         isBr          -> 1.U(1.W) ## funct3,
         isMem         -> isAtom ## funct3,
-        isCalStreamRD -> 0.U,
-        isCalStreamNRD   -> 0.U //TODO
+        isCalStreamRD -> funct7(3,0), // 目前有乘法和减法
+        (isCalStreamNRD && isCalStreamRJRK) -> 6.U, // 目前是or
+        (isCalStreamNRD && !isCalStreamRJRK)   -> 0.U //TODO 目前有加法
     ))
     io.op := op_6 ## op_5 ## op_4 ## op_3_0
 
@@ -101,6 +112,6 @@ class Decoder extends Module{
     ))
     io.imm := imm
 
-    io.func := isMem ## (isMuldiv || isPriv || isCfgStream || isCalStreamRD) ## !(isMem || isMuldiv || isPriv || isCfgStream || isCalStreamRD)
+    io.func := isMem ## (isMuldiv || isPriv || isStreamMdu) ## !(isMem || isMuldiv || isPriv || isStreamMdu)
 
 }
