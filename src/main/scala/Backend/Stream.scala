@@ -260,10 +260,10 @@ class StreamEngine extends Module {
       base: UInt
     ): UInt = {
       Mux(sum < limit, sum,                          // inner
-        Mux(stride + limit < 64.U,                   // stage内跳stride
+        Mux(stride + limit < (64.U << stage),        // stage内跳stride
           sum + stride,
           Mux(stage + 1.U < stageLimit,              // stage++
-            (base << (stage + 1.U)) + sum - limit,
+            sum + stride << 1,
             base + sum - limit                       // block++
           )
         )
@@ -277,19 +277,16 @@ class StreamEngine extends Module {
             val sum = ppCntMap(b) + ppInstNum
             ppCntMap(b) := nextIndex(sum, ppLimitDyn(b), ppStrideDyn(b), stageDyn(b), stageLimitCfg(b), ppBaseCfg(b))
             when (sum >= ppLimitDyn(b)){ 
-                when (ppStrideDyn(b) + ppLimitDyn(b) < 64.U) {  
+                when (ppStrideDyn(b) + ppLimitDyn(b) < (64.U << stageDyn(b))) {  
                     assert(ppInstNum <= stageDyn(b), "can't overflow stride")
                     ppLimitDyn(b) := ppLimitDyn(b) + ppStrideDyn(b) << 1
                 }.elsewhen( stageDyn(b) + 1.U < stageLimitCfg(b)){  
-                    val nextStage = stageDyn(b) + 1.U
-                    val nextBase = ppBaseCfg(b) << nextStage
-                    val nextStride = ppStrideDyn(b) << 1
-                    ppStrideDyn(b)     := nextStride
-                    ppLimitDyn(b)   := nextBase +  nextStride
-                    stageDyn(b)     := nextStage
+                    ppStrideDyn(b)     := ppStrideDyn(b) << 1
+                    ppLimitDyn(b) := ppLimitDyn(b) + ppStrideDyn(b) << 2
+                    stageDyn(b)     := stageDyn(b) + 1.U
                 }.otherwise{ //block++
                     ppStrideDyn(b) := 2.U
-                    ppLimitDyn(b) := ppBaseCfg(b) + ppStrideDyn(b)
+                    ppLimitDyn(b) := ppBaseCfg(b) + 2.U
                     stageDyn(b) := 0.U
                 }
             }
