@@ -274,9 +274,12 @@ class StreamEngine extends Module {
 
     //TODO:CFG
     ppBaseCfg(0) := 0.U
-    ppBaseCfg(1) := 2.U
+    when(ppBaseCfg(1) === 0.U){
+    ppBaseCfg(1) := 2.U 
+    ppCntMap(1)  := 2.U
     ppLimitDyn(0) := 2.U
     ppLimitDyn(1) := 4.U
+    }
     // b = 0，流流流；b = 1，寄寄流
     for (b <- 0 until 2) {
         val ppInstNum = PopCount(io.rdIter.fireStreamOpPP(b))
@@ -285,7 +288,7 @@ class StreamEngine extends Module {
             ppCntMap(b) := nextIndex(sum, ppLimitDyn(b), ppStrideDyn(b), stageDyn(b), stageLimitCfg(b), ppBaseCfg(b))
             when (sum >= ppLimitDyn(b)){ 
                 when (ppStrideDyn(b) + ppLimitDyn(b) < (64.U << stageDyn(b))) {  
-                    assert(ppInstNum <= stageDyn(b), "can't overflow stride")
+                    assert(ppInstNum <= ppLimitDyn(b), "can't overflow stride")
                     ppLimitDyn(b) := ppLimitDyn(b) + ppStrideDyn(b) << 1
                 }.elsewhen( stageDyn(b) + 1.U < stageLimitCfg(b)){  
                     ppStrideDyn(b)     := ppStrideDyn(b) << 1
@@ -305,7 +308,7 @@ class StreamEngine extends Module {
     }
 
     def getPP( ppRaw: UInt ): (UInt,UInt) = {
-        ( 0.U ## ppRaw(5), Cat(ppRaw(6), ppRaw(4,0)) )
+        ( 0.U ## ppRaw(5), Cat(~ppRaw(6), ppRaw(4,0)) )
     }
 
     // Issue stage
