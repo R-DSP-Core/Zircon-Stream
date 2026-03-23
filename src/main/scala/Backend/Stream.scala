@@ -357,6 +357,16 @@ class StreamEngine extends Module {
 
     //----------------- 2.1:READ -------------------
     // Vec[streamNum,Vec(fifoSegNum,bool())]
+    for (i <- 0 until 2){
+        when(stageLimitCfg(i) =/= 0.U && stageDyn(i) + 1.U < stageLimitCfg(i)) {
+            when(stageLimitCfg(i)(0)){ //偶数次stage，每个新block都是seg_0取数
+                burstCntMap(i) := burstCntMap(i) - l2LineWord.U
+            }.otherwise{ //奇数次stage，每个新block会切换seg取数
+                lengthMap(i) := lengthMap(i) + l2LineWord.U
+            }
+        }
+    }
+    
     val fifoSegEmptyBase = VecInit.tabulate(2){ j =>
       VecInit.tabulate(fifoSegNum){ k =>
         loadreadyMap(j)
