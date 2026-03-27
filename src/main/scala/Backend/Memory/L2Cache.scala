@@ -252,7 +252,7 @@ class L2Cache extends Module {
     val s1Rreq     = io.dc.rreq || (!io.se.l2S1Valid && io.se.rreq)
     val s1Uncache  = Mux(io.se.l2S1Valid, io.dc.uncache, false.B)
     val s1Paddr   = Mux(io.se.l2S1Valid, io.dc.paddr, io.se.paddr)
-    val c2s1       = (new L2Channel2Stage1Signal)(Mux(dcHazard, false.B, s1Rreq), Mux(dcHazard, false.B, io.dc.wreq), s1Uncache, s1Paddr, io.dc.mtype, io.dc.wdata, io.se.rreq)
+    val c2s1       = (new L2Channel2Stage1Signal)(Mux(dcHazard, false.B, s1Rreq), Mux(dcHazard, false.B, io.dc.wreq), s1Uncache, s1Paddr, io.dc.mtype, io.dc.wdata, (!io.se.l2S1Valid && io.se.rreq))
     // Segreg1-2
     val c2s2       = ShiftRegister(c2s1, 1, 0.U.asTypeOf(new L2Channel2Stage1Signal), !missC2)
     /* stage 2: search the tag to determine hit or miss, as well as read the data from the line */
