@@ -49,16 +49,16 @@ class IQEntry(num: Int) extends Bundle {
     
     def wakeup(wakeBus: Vec[WakeupBusPkg], rplyBus: ReplayBusPkg, deqItem: Seq[DecoupledIO[BackendPackage]], isMem: Boolean, streamReady: Vec[Bool], flatIdx: UInt): IQEntry = {
         val e = WireDefault(this)
-        val prjWkNxt = Mux(
-            this.item.isCalStream, streamReady(flatIdx), Mux(                   
-            this.item.prjLpv.orR && rplyBus.replay, 
-            false.B, this.item.prjWk || wakeBus.map(_.prd === this.item.prj).reduce(_ || _) || rplyBus.prd === this.item.prj)
-        )
-        val prkWkNxt = Mux(
-            this.item.isCalStream, streamReady(flatIdx), Mux(                   
-            this.item.prkLpv.orR && rplyBus.replay, 
-            false.B, this.item.prkWk || wakeBus.map(_.prd === this.item.prk).reduce(_ || _) || rplyBus.prd === this.item.prk)
-        )
+        val prjWkNxt =               
+            Mux(this.item.isCalStream && this.item.needStreamSrc, streamReady(flatIdx) ,
+            Mux(this.item.prjLpv.orR && rplyBus.replay, false.B, 
+            (this.item.prjWk || wakeBus.map(_.prd === this.item.prj).reduce(_ || _) || rplyBus.prd === this.item.prj) && (!this.item.needStreamSrc || streamReady(flatIdx))) )    
+
+        val prkWkNxt = 
+            Mux(this.item.isCalStream && this.item.needStreamSrc, streamReady(flatIdx) ,
+            Mux(this.item.prkLpv.orR && rplyBus.replay, false.B, 
+            (this.item.prkWk || wakeBus.map(_.prd === this.item.prk).reduce(_ || _) || rplyBus.prd === this.item.prk) && (!this.item.needStreamSrc || streamReady(flatIdx))))
+    
         val stBeforeNxt = if(isMem) this.stBefore - PopCount(deqItem.map{case s => s.valid && s.ready && Mux(this.item.op(6), true.B, s.bits.op(6))}) else this.stBefore
         e.stBefore := stBeforeNxt
         e.item.prjWk := prjWkNxt
