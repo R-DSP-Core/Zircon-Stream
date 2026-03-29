@@ -28,7 +28,16 @@ class BackendBDBIO extends Bundle {
     val wen   = Output(Vec(arithNissue, Bool()))
     val wdata = Output(Vec(arithNissue, new BDBEntry))
 }
+
+class CommitStreamIO extends Bundle{
+    val flush       = Input(Bool())
+    val fireStreamOp = Input(Vec(3,Vec(ncommit,Bool()))) // use 0 | use 1 | use 2
+    val fireStreamOpPP = Input(Vec(2,Vec(ncommit,Bool())))
+    val iterCnt = Input(Vec(3,Vec(ncommit,UInt(32.W))))
+}
+
 class BackendCommitIO extends Bundle {
+    val stream = new CommitStreamIO
     val rob = new BackendROBIO
     val bdb = new BackendBDBIO
     val sb    = new DCommitIO
@@ -194,6 +203,7 @@ class Backend extends Module {
     for (j <- 0 until muldivNiq){
         mdIQ.io.se(j) <> stream.io.iss(j+arithNiq)
     }
+    io.cmt.stream <> stream.io.cmt
     arPP(0).serf <> stream.io.rf(0)
     arPP(1).serf <> stream.io.rf(1)
     arPP(2).serf <> stream.io.rf(2)

@@ -5,6 +5,8 @@ import ZirconConfig.Decode._
 import ZirconConfig.RegisterFile._
 import ZirconConfig.Issue._
 import ZirconUtil._
+import ZirconConfig.Stream._
+import ZirconConfig.EXEOp._
 
 class CommitDBGIO extends Bundle {
     val rob = new ROBDebugIO
@@ -126,4 +128,21 @@ class Commit extends Module {
     }
     io.dbg.bdbDeq.deq.valid := bdb.io.cmt.deq.valid
     io.dbg.bdbDeq.deq.bits  := bdb.io.cmt.deq.bits
+
+    // stream
+    io.bke.stream.flush := ShiftRegister(flush, 1, false.B, true.B)
+    for (i <- 0 until ncommit) {
+        val instBits = rob.io.cmt.deq(i).bits
+        val useBuffer = instBits.sinfo.useBuffer
+        val usePPBuffer = instBits.sinfo.usePPBuffer
+        val sop = instBits.sinfo.op
+        val fireStream = (sop === CALSTREAMRD || sop === CALRJRKSTREAMPP || sop === CALSTREAM || sop === CALSTREAMPP) && rob.io.cmt.deq(i).valid
+        for (b <- 0 until 3) {
+          io.bke.stream.fireStreamOp(b)(i) := fireStream && useBuffer(b)
+          io.bke.stream.iterCnt(b)(i) := instBits.itercnt(b)
+        }
+        for (k <- 0 until 2) {
+          io.bke.stream.fireStreamOpPP(k)(i) := fireStream && usePPBuffer(k)
+        }
+    }     
 }
