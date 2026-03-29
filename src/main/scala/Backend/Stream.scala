@@ -363,7 +363,7 @@ class StreamEngine extends Module {
         )
         val Odd =       
         Mux(sum < limit, sum,                          // inner
-          Mux(stride + limit < (64.U << stage),        // stage内跳stride
+          Mux(stride + limit < (64.U * (stage+1.U)),        // stage内跳stride
             sum + stride,
             Mux(stage + 1.U < stageLimit,              // stage++
               sum + (stride << 1),
@@ -401,7 +401,7 @@ class StreamEngine extends Module {
           isOdd
         )
         when(sum >= state.ppLimit) {
-          when(state.ppStride + state.ppLimit < (64.U << state.ppStage)) {
+          when(state.ppStride + state.ppLimit < (64.U * (state.ppStage+1.U))) {
             nextState.ppLimit := state.ppLimit + (state.ppStride << 1)
           }
           .elsewhen(state.ppStage + 1.U < stageLimit) {
