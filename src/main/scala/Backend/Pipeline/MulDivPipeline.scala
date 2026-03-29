@@ -76,8 +76,8 @@ class MulDivPipeline extends Module {
     io.rf.rd.prj    := instPkgRF.prj
     io.rf.rd.prk    := instPkgRF.prk
     io.serf.iterCnt  := instPkgRF.iterCnt
-    instPkgRF.src1  := Mux(instPkgRF.isCalStream, io.serf.rdata1 ,io.rf.rd.prjData)
-    instPkgRF.src2  := Mux(instPkgRF.isCalStream, io.serf.rdata2 ,io.rf.rd.prkData)
+    instPkgRF.src1  := Mux(instPkgRF.needStreamSrc, io.serf.rdata1 ,io.rf.rd.prjData)
+    instPkgRF.src2  := Mux(instPkgRF.needStreamSrc, io.serf.rdata2 ,io.rf.rd.prkData)
     instPkgRF.cycles.exe := cycleReg  // for profiling
     /* Execute Stage 1 */
     val instPkgEX1 = WireDefault(ShiftRegister(

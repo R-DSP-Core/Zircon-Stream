@@ -20,6 +20,7 @@ class DecoderIO extends Bundle{
     val func    = Output(UInt(niq.W))
     val sinfo  = Output(new StreamInfo())
     val isCalStream = Output(Bool())
+    val needStreamSrc = Output(Bool())
 }
 
 class Decoder extends Module{
@@ -67,6 +68,7 @@ class Decoder extends Module{
         io.sinfo.useBuffer(i) := isCalStream && !isCalStreamRJRK
     }       
     io.isCalStream := isCalStream
+    io.needStreamSrc := isCalStream && (io.sinfo.op =/= CALRJRKSTREAMPP)
     io.sinfo.useBuffer(2)   := isStream && io.sinfo.op === CALSTREAM // RD写通用寄存器，另外两条指令写PPbuffer
     io.sinfo.usePPBuffer(Even) := isStream && io.sinfo.op === CALSTREAMPP
     io.sinfo.usePPBuffer(Odd) := isStream && io.sinfo.op === CALRJRKSTREAMPP
