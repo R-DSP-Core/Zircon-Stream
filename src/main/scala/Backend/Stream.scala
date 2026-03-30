@@ -156,6 +156,8 @@ class dynIState extends Bundle {
 class StreamEngine extends Module {
     val io = IO(new StreamEngineIO)
 
+    val ppDecBase = RegInit(0.U(1.W))
+
     val archPP = RegInit(VecInit.fill(2)(0.U.asTypeOf(new dynPPState)))
     val specPP = RegInit(VecInit.fill(2)(0.U.asTypeOf(new dynPPState)))
     val ppBaseCfg = RegInit(VecInit.fill(2)(0.U(ppCntWidth.W))) 
@@ -358,14 +360,16 @@ class StreamEngine extends Module {
     ): UInt = {
         val Even = 
         Mux(sum < limit, sum, 
-          Mux(stage + 1.U < stageLimit,  sum + stride, base + sum - limit  
-          )
+          Mux(stride + limit < (64.U * (stage+1.U)), 
+          sum + stride,
+          Mux(stage + 1.U < stageLimit- 1.U,  sum + stride, base + sum - limit  
+          ))
         )
         val Odd =       
         Mux(sum < limit, sum,                          // inner
           Mux(stride + limit < (64.U * (stage+1.U)),        // stage内跳stride
             sum + stride,
-            Mux(stage + 1.U < stageLimit,              // stage++
+            Mux(stage + 1.U < stageLimit- 1.U,              // stage++
               sum + (stride << 1),
               base + sum - limit                       // block++
             )
@@ -380,7 +384,7 @@ class StreamEngine extends Module {
       stageLimit: UInt,
       base: UInt,
       isOdd: Bool
-    ): (dynPPState, Vec[UInt]) = {
+    ): (dynPPState, Vec[UInt], Bool) = {
 
       val width = fireVec.length
       val nextState = Wire(new dynPPState)
@@ -388,6 +392,7 @@ class StreamEngine extends Module {
       val iterCnt = Wire(Vec(width, UInt(ppCntWidth.W)))
       val fireNum = PopCount(fireVec)
       val sumBase = state.ppCnt
+      val tag = WireInit(false.B)
       // 1. 状态更新
       when(fireNum =/= 0.U) {
         val sum = sumBase + fireNum
@@ -404,7 +409,7 @@ class StreamEngine extends Module {
           when(state.ppStride + state.ppLimit < (64.U * (state.ppStage+1.U))) {
             nextState.ppLimit := state.ppLimit + (state.ppStride << 1)
           }
-          .elsewhen(state.ppStage + 1.U < stageLimit) {
+          .elsewhen(state.ppStage + 1.U < stageLimit - 1.U) { //-1.U表示实际上到stage4就重置
             nextState.ppStride := state.ppStride << 1
             nextState.ppLimit := Mux(
               isOdd,
@@ -417,6 +422,7 @@ class StreamEngine extends Module {
             nextState.ppStride := 2.U
             nextState.ppLimit  := base + 2.U
             nextState.ppStage  := 0.U
+            tag := true.B
           }
         }
       }
@@ -433,7 +439,7 @@ class StreamEngine extends Module {
           isOdd
         )
       }
-      (nextState, iterCnt)
+      (nextState, iterCnt, tag)
     }
 
     //TODO:CFG
@@ -441,6 +447,8 @@ class StreamEngine extends Module {
     when(!initDone) {
       ppBaseCfg(0) := 0.U
       ppBaseCfg(1) := 2.U
+      stageLimitCfg(0) := 5.U
+      stageLimitCfg(1) := 5.U
       for (b <- 0 until 2) {
         val initState = Wire(new dynPPState)
         initState.ppCnt    := (2 * b).U
@@ -453,9 +461,15 @@ class StreamEngine extends Module {
       initDone := true.B
     }
 
+    def getPP( ppRaw: UInt , revSeg: UInt): (UInt,UInt) = {
+        ( 0.U ## ppRaw(5), Mux(revSeg === 0.U, Cat(~ppRaw(6), ppRaw(4,0)), Cat(ppRaw(6), ppRaw(4,0))) )
+    }
+
     // b = 0，流流流；b = 1，寄寄流
+    val tagR = RegInit(false.B)
+    val cntInst = RegInit(0.U(32.W))//TODO: CFG to 256
     for (b <- 0 until 2) {
-      val (nextState, iterCnt) = updatePPState(
+      val (nextState, iterCnt, omitTag) = updatePPState(
         state       = specPP(b),
         fireVec     = io.rdIter.fireStreamOpPP(b),
         stageLimit  = stageLimitCfg(b),
@@ -465,11 +479,9 @@ class StreamEngine extends Module {
       when(initDone){
         specPP(b) := nextState
         when(io.rdIter.fireStreamOpPP(b).asUInt.orR){
-          if(b == 0) {
             printf(p"---------------------- DST --------------------------\n")
             printf(p"specPP$b: cnt=${specPP(b).ppCnt}, stride=${specPP(b).ppStride}, limit=${specPP(b).ppLimit}, stage=${specPP(b).ppStage}\n")
             printf(p"firenum=${PopCount(io.rdIter.fireStreamOpPP(b))}, nextSpecPP$b: cnt=${nextState.ppCnt}, stride=${nextState.ppStride}, limit=${nextState.ppLimit}, stage=${nextState.ppStage}\n")
-          }
         }
       }
       io.rdIter.iterCntPP(b) := iterCnt
@@ -484,22 +496,36 @@ class StreamEngine extends Module {
         }
       }
       // COMMIT
-      val (nextArchState, iterCntArch) = updatePPState(
+      val (nextArchState, iterCntArch, archTag) = updatePPState(
         state       = archPP(b),
         fireVec     = io.cmt.fireStreamOpPP(b),
         stageLimit  = stageLimitCfg(b),
         base        = ppBaseCfg(b),
         isOdd       = (b.U === Odd.U)
       )
+      if(b == 0){
+        tagR := archTag//TODO
+      }
       when(initDone){
         archPP(b) := nextArchState
       }
     }
+
+    // COMMIT
     for (i <- 0 until ncommit) {
       when(io.cmt.fireStreamOpPP(0)(i) || io.cmt.fireStreamOpPP(1)(i)){
-        val (ppId, ppIdx) = getPP(io.cmt.iterCnt(2)(i))
+        assert(!io.cmt.fireStreamOpPP(0)(i) || !io.cmt.fireStreamOpPP(1)(i))
+        val (ppId, ppIdx) = getPP(io.cmt.iterCnt(2)(i), ppDecBase)
         archLoadReadyMap(ppId)(ppIdx) := reuseCfg(ppId)
       }
+    }
+    val inc = PopCount((0 until ncommit).map(i => 
+      io.cmt.fireStreamOpPP(0)(i) || io.cmt.fireStreamOpPP(1)(i)
+    ))
+    cntInst := cntInst + inc
+    when(cntInst === 256.U){
+      cntInst := 0.U
+      ppDecBase := ~ppDecBase
     }
 
     // Flush
@@ -512,9 +538,6 @@ class StreamEngine extends Module {
       printf(p"flush! specPP0 cnt=${specPP(0).ppCnt}, stage=${specPP(0).ppStage}, specPP1 cnt=${specPP(1).ppCnt}, stage=${specPP(1).ppStage}, archPP0 cnt=${archPP(0).ppCnt}, stage=${archPP(0).ppStage}, archPP1 cnt=${archPP(1).ppCnt}, stage=${archPP(1).ppStage}\n")
     }
 
-    def getPP( ppRaw: UInt ): (UInt,UInt) = {
-        ( 0.U ## ppRaw(5), Cat(~ppRaw(6), ppRaw(4,0)) )
-    }
 
     // Issue stage
     for (i <- 0 until 16) {
@@ -522,7 +545,7 @@ class StreamEngine extends Module {
         for (b <- 0 until 3) {
             issWordIdx(b) := (io.iss(i).iterCnt(b) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
         }
-        val (ppId, ppIdx) = getPP(io.iss(i).iterCnt(2))
+        val (ppId, ppIdx) = getPP(io.iss(i).iterCnt(2), ppDecBase)
         val ppRdy = !io.iss(i).usePPBuffer || loadreadyMap(ppId)(ppIdx) === 0.U
         io.iss(i).ready :=  io.iss(i).isCalStream &
                           (loadreadyMap(0)(issWordIdx(0)) =/= 0.U || !io.iss(i).useBuffer(0)) &
@@ -551,9 +574,9 @@ class StreamEngine extends Module {
                 storereadyMap(wbWordIdx) := true.B 
             }
             when(io.wb(i).usePPBuffer){
-                val (ppId, ppIdx) = getPP(io.wb(i).iterCnt(2))
+                val (ppId, ppIdx) = getPP(io.wb(i).iterCnt(2), ppDecBase)
                 Fifo(ppId)(ppIdx) := io.wb(i).wdata
-                assert(loadreadyMap(ppId)(ppIdx) === 0.U, "pp buffer should be empty")
+                assert(loadreadyMap(ppId)(ppIdx) === 0.U,p"itercnt = ${io.wb(i).iterCnt(2)}, buffer ${ppId}[${ppIdx}] should be empty")
                 loadreadyMap(ppId)(ppIdx) := reuseCfg(ppId)
             }
         }
@@ -564,15 +587,18 @@ class StreamEngine extends Module {
     val axiSize = 2.U
 
     //----------------- 2.1:READ -------------------
-    // Vec[streamNum,Vec(fifoSegNum,bool())]
-    for (i <- 0 until 2){
-        when(stageLimitCfg(i) =/= 0.U && specPP(i).ppStage + 1.U < stageLimitCfg(i)) {
-            when(stageLimitCfg(i)(0)){ //偶数次stage，每个新block都是seg_0取数
-                burstCntMap(i) := burstCntMap(i) - l2LineWord.U
-            }.otherwise{ //奇数次stage，每个新block会切换seg取数
-                lengthMap(i) := lengthMap(i) + l2LineWord.U
-            }
+    when(initDone && tagR){
+      for (i <- 0 until 2){
+        oIterCntMap(i) := oIterCntMap(i) - 1.U // TODO 0 < 1
+        addrDyn(i) := addrCfg(i) + lengthMap(i) * tileStrideCfg(i) // TODO 只适用于奇数
+        when(!stageLimitCfg(i)(0)){ //偶数次stage，每个新block都是seg_0取数
+            burstCntMap(i) := burstCntMap(i) - 1.U
+        }.otherwise{ //奇数次stage，每个新block会切换seg取数
+            lengthMap(i) := lengthMap(i) + 1.U
         }
+      }
+      //ppDecBase := ~ppDecBase //TODO切换seg
+      tagR := false.B
     }
     
     val fifoSegEmptyBase = VecInit.tabulate(2){ j =>
@@ -616,7 +642,7 @@ class StreamEngine extends Module {
         {
             oIterCntMap(loadFifoIdAXIReg) :=oIterCntMap(loadFifoIdAXIReg) + 1.U
         }
-        addrDyn(loadFifoIdAXIReg)     := Mux(isWrap, addrCfg(loadFifoIdAXIReg), addrDyn(loadFifoIdAXIReg) + l2Line.U)
+        addrDyn(loadFifoIdAXIReg)     := Mux(isWrap, addrCfg(loadFifoIdAXIReg), addrDyn(loadFifoIdAXIReg) + tileStrideCfg(loadFifoIdAXIReg))
         burstCntMap(loadFifoIdAXIReg)  := burstCntMap(loadFifoIdAXIReg) + 1.U
     }
     io.mem.rreq      := loadValidAXIReg
