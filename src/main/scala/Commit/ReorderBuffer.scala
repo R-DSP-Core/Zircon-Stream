@@ -37,6 +37,7 @@ class ROBEntry extends Bundle{
     val cycle = new cycleStat
     val sinfo = new StreamInfo()
     val itercnt = Vec(3,UInt(32.W))
+    val sWdata = UInt(32.W)
     
     def apply(pkg: FrontendPackage): ROBEntry = {
         val entry = WireDefault(0.U.asTypeOf(new ROBEntry))
@@ -58,6 +59,7 @@ class ROBEntry extends Bundle{
         entry.cycle    := pkg.cycles
         entry.sinfo    := pkg.sinfo
         entry.itercnt  := pkg.iterCnt
+        entry.sWdata   := pkg.rfWdata //其实也是stream write data
         entry
     }
     def enqueue(data: Data): Unit = {
@@ -79,6 +81,7 @@ class ROBEntry extends Bundle{
         this.cycle := bits.cycle
         this.nxtCmtEn := bits.nxtCmtEn
         this.itercnt := bits.itercnt
+        this.sWdata := bits.sWdata
     }
 }
 

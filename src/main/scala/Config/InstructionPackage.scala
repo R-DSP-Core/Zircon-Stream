@@ -63,6 +63,7 @@ class BackendPackage extends Bundle {
     val isCalStream = Bool()
     val needStreamSrc = Bool()
     val iterCnt    = Vec(3,UInt(32.W))
+    val swdata     = UInt(32.W)
 
     //for profiling
     val cycles = new cycleStat()

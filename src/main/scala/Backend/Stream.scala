@@ -590,14 +590,13 @@ class StreamEngine extends Module {
     when(initDone && tagR){
       for (i <- 0 until 2){
         oIterCntMap(i) := oIterCntMap(i) - 1.U // TODO 0 < 1
-        addrDyn(i) := addrCfg(i) + lengthMap(i) * tileStrideCfg(i) // TODO 只适用于奇数
+        addrDyn(i) := addrCfg(i) + lengthMap(i) * tileStrideCfg(i) // TODO 只适用于奇数TODO
         when(!stageLimitCfg(i)(0)){ //偶数次stage，每个新block都是seg_0取数
             burstCntMap(i) := burstCntMap(i) - 1.U
         }.otherwise{ //奇数次stage，每个新block会切换seg取数
             lengthMap(i) := lengthMap(i) + 1.U
         }
       }
-      //ppDecBase := ~ppDecBase //TODO切换seg
       tagR := false.B
     }
     
