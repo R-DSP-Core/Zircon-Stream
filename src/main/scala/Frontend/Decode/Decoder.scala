@@ -72,7 +72,7 @@ class Decoder extends Module{
     io.sinfo.useBuffer(2)   := isStream && io.sinfo.op === CALSTREAM // RD写通用寄存器，另外两条指令写PPbuffer
     io.sinfo.usePPBuffer(Even) := isStream && io.sinfo.op === CALSTREAMPP
     io.sinfo.usePPBuffer(Odd) := isStream && io.sinfo.op === CALRJRKSTREAMPP
-    val isStreamAlu = isCalStream && !(isCalStreamRD && funct7 === 0.U ) 
+    val isStreamAlu = isCalStream && (!isCalStreamRD || (funct7 === 0.U || funct7 === 8.U )) //TODO 加法0 减法8
     val isStreamMdu = isStream && !isStreamAlu
 
     /* op: 
@@ -91,7 +91,7 @@ class Decoder extends Module{
         isJal         -> JAL(3, 0),
         isBr          -> 1.U(1.W) ## funct3,
         isMem         -> isAtom ## funct3,
-        isCalStreamRD -> funct7(3,0), // 目前有乘法和减法
+        isCalStreamRD -> funct7(3,0), // 目前有乘法、减法和加法
         (isCalStreamNRD && isCalStreamRJRK) -> 6.U, // 目前是or
         (isCalStreamNRD && !isCalStreamRJRK)   -> 0.U //TODO 目前是加法
     ))
