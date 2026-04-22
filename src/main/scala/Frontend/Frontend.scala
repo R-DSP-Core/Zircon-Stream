@@ -159,6 +159,7 @@ class Frontend extends Module {
         pkg.func    := dcd.func
         pkg.sinfo   := dcd.sinfo
         pkg.isCalStream := dcd.isCalStream
+        pkg.needStreamSrc := dcd.needStreamSrc
     }
     for (i <- 0 until instPkgDSPIn.length) {
       instPkgDSPIn(i).cycles.dispatch := cycleReg

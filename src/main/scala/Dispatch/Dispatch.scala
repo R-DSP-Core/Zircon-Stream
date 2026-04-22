@@ -12,7 +12,9 @@ import ZirconUtil._
 // 把正确的 iter值带着，进入IQ
 class SERdIterIO extends Bundle{
     val fireStreamOp = Output(Vec(3,Vec(ndcd,Bool())))
-    val iterCnt = Input(Vec(3,UInt(32.W)))
+    val iterCnt =       Input(Vec(3,Vec(ndcd,UInt(32.W))))
+    val fireStreamOpPP = Output(Vec(2,Vec(ndcd,Bool())))
+    val iterCntPP =       Input(Vec(2,Vec(ndcd,UInt(32.W))))
 }
 
 
@@ -29,28 +31,45 @@ class Dispatch extends Module {
     val dsp    = Module(new Dispatcher)
     val rboard = Module(new ReadyBoard)
 
+    def genIter( fire: Vec[Bool], iter: Vec[UInt]): Vec[UInt] = {
+      val idx = fire.scanLeft(0.U(ndcd.W))(_ + _).dropRight(1)
+      VecInit((0 until ndcd).map(i => iter(idx(i))))
+    }
+
     // cycle stat
     val cycleReg = RegInit(0.U(64.W))
     cycleReg     := cycleReg + 1.U
 
-    // TODO
     for (i <- 0 until ndcd) {
         val instBits = io.fte.instPkg(i).bits
         val useBuffer = instBits.sinfo.useBuffer
+        val usePPBuffer = instBits.sinfo.usePPBuffer
         val fireStream = instBits.isCalStream && io.cmt.rob.enq(i).fire
         for (b <- 0 until 3) {
           io.seRIter.fireStreamOp(b)(i) := fireStream && useBuffer(b)
         }
+        for (k <- 0 until 2) {
+          io.seRIter.fireStreamOpPP(k)(i) := fireStream && usePPBuffer(k)
+        }
     }     
     
     val seIter = WireInit(VecInit.fill(3)(VecInit.fill(ndcd)(0.U(32.W))))
-    for (b <- 0 until 3) {
-        seIter(b)(0) := io.seRIter.iterCnt(b)
-        for (i <- 1 until ndcd) {
-            seIter(b)(i) := Mux(io.seRIter.fireStreamOp(b)(i-1), seIter(b)(i-1) + 1.U, seIter(b)(i-1))
-        } 
+    // src正常根据 01号索引表获取
+    for (b <- 0 until 2) {
+      seIter(b) := genIter(io.seRIter.fireStreamOp(b), io.seRIter.iterCnt(b))
     }
-    
+    // dst获取需要根据指令类型判断，常规 、Even PP 、OddPP ，对应三组独立的索引更新规则
+    val normal = genIter(io.seRIter.fireStreamOp(2), io.seRIter.iterCnt(2))
+    val ppEven    = genIter(io.seRIter.fireStreamOpPP(Even), io.seRIter.iterCntPP(Even))
+    val ppOdd    = genIter(io.seRIter.fireStreamOpPP(Odd), io.seRIter.iterCntPP(Odd))
+    for (i <- 0 until ndcd) {
+      seIter(2)(i) :=
+        Mux(io.seRIter.fireStreamOpPP(Even)(i), ppEven(i),
+          Mux(io.seRIter.fireStreamOpPP(Odd)(i), ppOdd(i),
+            normal(i)))
+    }
+
+
     // ready board
     rboard.io.pinfo   := io.fte.instPkg.map(_.bits.pinfo)
     rboard.io.wakeBus := io.bke.wakeBus

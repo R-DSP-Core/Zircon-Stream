@@ -49,16 +49,16 @@ class IQEntry(num: Int) extends Bundle {
     
     def wakeup(wakeBus: Vec[WakeupBusPkg], rplyBus: ReplayBusPkg, deqItem: Seq[DecoupledIO[BackendPackage]], isMem: Boolean, streamReady: Vec[Bool], flatIdx: UInt): IQEntry = {
         val e = WireDefault(this)
-        val prjWkNxt = Mux(
-            this.item.isCalStream, streamReady(flatIdx), Mux(                   
-            this.item.prjLpv.orR && rplyBus.replay, 
-            false.B, this.item.prjWk || wakeBus.map(_.prd === this.item.prj).reduce(_ || _) || rplyBus.prd === this.item.prj)
-        )
-        val prkWkNxt = Mux(
-            this.item.isCalStream, streamReady(flatIdx), Mux(                   
-            this.item.prkLpv.orR && rplyBus.replay, 
-            false.B, this.item.prkWk || wakeBus.map(_.prd === this.item.prk).reduce(_ || _) || rplyBus.prd === this.item.prk)
-        )
+        val prjWkNxt =               
+            Mux(this.item.isCalStream && this.item.needStreamSrc, streamReady(flatIdx) ,
+            Mux(this.item.prjLpv.orR && rplyBus.replay, false.B, 
+            (this.item.prjWk || wakeBus.map(_.prd === this.item.prj).reduce(_ || _) || rplyBus.prd === this.item.prj) && (!this.item.needStreamSrc || streamReady(flatIdx))) )    
+
+        val prkWkNxt = 
+            Mux(this.item.isCalStream && this.item.needStreamSrc, streamReady(flatIdx) ,
+            Mux(this.item.prkLpv.orR && rplyBus.replay, false.B, 
+            (this.item.prkWk || wakeBus.map(_.prd === this.item.prk).reduce(_ || _) || rplyBus.prd === this.item.prk) && (!this.item.needStreamSrc || streamReady(flatIdx))))
+    
         val stBeforeNxt = if(isMem) this.stBefore - PopCount(deqItem.map{case s => s.valid && s.ready && Mux(this.item.op(6), true.B, s.bits.op(6))}) else this.stBefore
         e.stBefore := stBeforeNxt
         e.item.prjWk := prjWkNxt
@@ -129,6 +129,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
     for (i <- 0 until num){
         io.se(i).isCalStream := false.B  
         io.se(i).useBuffer := VecInit.fill(3)(false.B)
+        io.se(i).usePPBuffer := false.B
         io.se(i).iterCnt := VecInit.fill(3)(0.U(32.W))    
     }
 
@@ -174,6 +175,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             val flatIdx = i * iq(0).size + j
             io.se(flatIdx).isCalStream:= e.item.isCalStream
             io.se(flatIdx).useBuffer := e.item.sinfo.useBuffer
+            io.se(flatIdx).usePPBuffer := e.item.sinfo.usePPBuffer.asUInt.orR
             io.se(flatIdx).iterCnt := e.item.iterCnt
             e := e.stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem, VecInit(io.se.map(_.ready)), flatIdx.U)
         }
@@ -184,6 +186,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             val flatIdx = freeIQ(i) * iq(0).size.U + freeItem(i)
             io.se(flatIdx).isCalStream := io.enq(i).bits.isCalStream
             io.se(flatIdx).useBuffer := io.enq(i).bits.sinfo.useBuffer
+            io.se(flatIdx).usePPBuffer := io.enq(i).bits.sinfo.usePPBuffer.asUInt.orR
             io.se(flatIdx).iterCnt := io.enq(i).bits.iterCnt
             iq(freeIQ(i))(freeItem(i)) := (new IQEntry(len))(
                 enqEntries(i), 

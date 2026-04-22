@@ -109,8 +109,8 @@ class ArithPipeline extends Module {
     io.rf.rd.prj   := instPkgRF.prj
     io.rf.rd.prk   := instPkgRF.prk
     io.serf.iterCnt  := instPkgRF.iterCnt
-    instPkgRF.src1 := Mux(instPkgRF.isCalStream, io.serf.rdata1, io.rf.rd.prjData)
-    instPkgRF.src2 := Mux(instPkgRF.isCalStream, io.serf.rdata2, io.rf.rd.prkData)
+    instPkgRF.src1 := Mux(instPkgRF.needStreamSrc , io.serf.rdata1, io.rf.rd.prjData)
+    instPkgRF.src2 := Mux(instPkgRF.needStreamSrc , io.serf.rdata2, io.rf.rd.prkData)
 
     io.cmt.rob.ridx.offset := UIntToOH(instPkgRF.robIdx.offset)
     io.cmt.rob.ridx.qidx   := UIntToOH(instPkgRF.robIdx.qidx)
@@ -137,8 +137,8 @@ class ArithPipeline extends Module {
 
     // alu
     alu.io.op            := instPkgEX.op(4, 0)
-    alu.io.src1          := Mux(instPkgEX.isCalStream, instPkgEX.src1, Mux(instPkgEX.op(6), instPkgEX.pc,  Mux(io.fwd.src1Fwd.valid, io.fwd.src1Fwd.bits, instPkgEX.src1)))
-    alu.io.src2          := Mux(instPkgEX.isCalStream, instPkgEX.src2, Mux(instPkgEX.op(5), Mux(io.fwd.src2Fwd.valid, io.fwd.src2Fwd.bits, instPkgEX.src2), instPkgEX.imm))
+    alu.io.src1          := Mux(instPkgEX.needStreamSrc, instPkgEX.src1, Mux(instPkgEX.op(6), instPkgEX.pc,  Mux(io.fwd.src1Fwd.valid, io.fwd.src1Fwd.bits, instPkgEX.src1)))
+    alu.io.src2          := Mux(instPkgEX.needStreamSrc, instPkgEX.src2, Mux(instPkgEX.op(5), Mux(io.fwd.src2Fwd.valid, io.fwd.src2Fwd.bits, instPkgEX.src2), instPkgEX.imm))
 
     // branch
     branch.io.op         := instPkgEX.op(4, 0)
@@ -189,6 +189,7 @@ class ArithPipeline extends Module {
 
     io.sewb.wvalid  := instPkgWB.isCalStream
     io.sewb.useBuffer := instPkgWB.sinfo.useBuffer
+    io.sewb.usePPBuffer := instPkgWB.sinfo.usePPBuffer.asUInt.orR
     io.sewb.iterCnt := instPkgWB.iterCnt
     io.sewb.wdata   :=  instPkgWB.rfWdata
     // forward

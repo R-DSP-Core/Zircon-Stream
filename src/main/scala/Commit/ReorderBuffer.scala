@@ -35,6 +35,9 @@ class ROBEntry extends Bundle{
     val complete = Bool()
     val nxtCmtEn = Bool()
     val cycle = new cycleStat
+    val sinfo = new StreamInfo()
+    val itercnt = Vec(3,UInt(32.W))
+    val sWdata = UInt(32.W)
     
     def apply(pkg: FrontendPackage): ROBEntry = {
         val entry = WireDefault(0.U.asTypeOf(new ROBEntry))
@@ -46,6 +49,7 @@ class ROBEntry extends Bundle{
         entry.isBranch := pkg.op(4)
         entry.isStore  := pkg.op(6) && pkg.func(2)
         entry.cycle    := pkg.cycles
+        entry.sinfo    := pkg.sinfo
         entry
     }
     def apply(pkg: BackendPackage): ROBEntry = {
@@ -53,6 +57,9 @@ class ROBEntry extends Bundle{
         entry.complete := pkg.valid
         entry.nxtCmtEn := pkg.nxtCmtEn
         entry.cycle    := pkg.cycles
+        entry.sinfo    := pkg.sinfo
+        entry.itercnt  := pkg.iterCnt
+        entry.sWdata   := pkg.rfWdata //其实也是stream write data
         entry
     }
     def enqueue(data: Data): Unit = {
@@ -65,6 +72,7 @@ class ROBEntry extends Bundle{
         this.isBranch := bits.isBranch
         this.isStore  := bits.isStore
         this.cycle    := bits.cycle
+        this.sinfo    := bits.sinfo
         this.complete := false.B
     }
     def write(data: Data): Unit = {
@@ -72,6 +80,8 @@ class ROBEntry extends Bundle{
         this.complete := bits.complete
         this.cycle := bits.cycle
         this.nxtCmtEn := bits.nxtCmtEn
+        this.itercnt := bits.itercnt
+        this.sWdata := bits.sWdata
     }
 }
 

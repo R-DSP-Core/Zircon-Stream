@@ -27,6 +27,7 @@ class FrontendPackage extends Bundle {
     //for profiling
     val cycles = new cycleStat()
     val isCalStream = Bool()
+    val needStreamSrc = Bool()
 }
 
 class BackendPackage extends Bundle {
@@ -60,7 +61,9 @@ class BackendPackage extends Bundle {
     val nxtCmtEn   = Bool()
     val sinfo      = new StreamInfo()
     val isCalStream = Bool()
+    val needStreamSrc = Bool()
     val iterCnt    = Vec(3,UInt(32.W))
+    val swdata     = UInt(32.W)
 
     //for profiling
     val cycles = new cycleStat()
@@ -79,6 +82,7 @@ class BackendPackage extends Bundle {
         bke.sinfo      := fte.sinfo
         bke.cycles     := fte.cycles
         bke.isCalStream:= fte.isCalStream
+        bke.needStreamSrc := fte.needStreamSrc
         bke.robIdx     := robIdx
         bke.bdbIdx     := bdbIdx
         bke.prjWk      := prjInfo.ready && fte.pinfo.prjWk
