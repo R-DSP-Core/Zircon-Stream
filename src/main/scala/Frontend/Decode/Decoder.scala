@@ -50,11 +50,17 @@ class Decoder extends Module{
     */
     io.sinfo.op := 0.U(1.W) ## funct3 //默认情况
     when(funct3 === 0x0.U){ //CFGI
-        io.sinfo.op := Mux(funct7 === 0x1.U, CFGILIMIT , (Mux(funct7 === 0x2.U, CFGIREPEAT, CFGI)))
+        io.sinfo.op := MuxCase(CFGI, Seq(
+            (funct7 === 0x1.U) -> CFGILIMIT,
+            (funct7 === 0x2.U) -> CFGIREPEAT,
+            (funct7 === 0x3.U) -> CFGIOFFSET
+        ))
     }.elsewhen(funct3 === 0x2.U){ //CALSTREAM
         io.sinfo.op := Mux(funct7 === 0x1.U, CALSTREAMPP, CALSTREAM)
     }.elsewhen(funct3 === 0x3.U){ //CFGSTRIDE
         io.sinfo.op := Mux(funct7 === 0x1.U, CFGTILESTRIDE, CFGSTRIDE)
+    }.elsewhen(funct3 === 0x4.U){ //CFGREUSE
+        io.sinfo.op := Mux(funct7 === 0x1.U, CFGREUSEEMPTY, CFGREUSE)
     }
     io.sinfo.state(DONECFG) := isStream
     io.sinfo.state(LDSTRAEM) := io.sinfo.op === CFGLOAD

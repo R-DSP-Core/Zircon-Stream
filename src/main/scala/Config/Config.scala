@@ -74,6 +74,8 @@ object EXEOp {
     val CFGI = 0x0.U(stInstBits.W)
     val CFGILIMIT = 0x8.U(stInstBits.W)
     val CFGIREPEAT = 0x9.U(stInstBits.W)
+    val CFGREUSEEMPTY = 0xA.U(stInstBits.W)
+    val CFGIOFFSET = 0xB.U(stInstBits.W)
 
     // funct3 = 2, funct7 = 0,1
     val CALSTREAM = 0x2.U(stInstBits.W)
