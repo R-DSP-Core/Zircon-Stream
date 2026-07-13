@@ -41,9 +41,13 @@ class PreDecoder extends Module {
     // STREAM FEAT1: RJ RK RD VALID
     val isStream = inst(6,0)===0x0b.U//0001011
     val streamOp = inst(14,12) 
+    val streamFunct7 = inst(31,25)
     val stRdVld = isStream && (streamOp === CALSTREAMRD)
-    val stRkVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || streamOp === CFGREUSE || streamOp === CALRJRKSTREAMPP )
-    val stRjVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || streamOp === CFGREUSE || streamOp === CALRJRKSTREAMPP )
+    // cfg_reuse_empty is encoded as CFGREUSE with funct7=1 and uses x0/x0,
+    // so only the normal cfg_reuse(funct7=0) reads rj/rk operands.
+    val cfgReuseHasOperands = streamOp === CFGREUSE && streamFunct7 === 0.U
+    val stRkVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || cfgReuseHasOperands || streamOp === CALRJRKSTREAMPP )
+    val stRjVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || cfgReuseHasOperands || streamOp === CALRJRKSTREAMPP )
 
     // rd
     val rdVld = (inst(3, 0) === 0x3.U && !(

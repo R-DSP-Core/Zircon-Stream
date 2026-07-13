@@ -167,6 +167,7 @@ class StreamEngine extends Module {
     val specI  = RegInit(VecInit.fill(streamNum)(0.U.asTypeOf(new dynIState)))
     val iLimitCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_limit
     val iRepeatCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_repeat
+    val iOffsetCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_offset
 
     val streamMap = RegInit(VecInit.fill(streamNum)(0.U(iterBits.W))) //fifo_id -> i_id
     val addrCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
@@ -197,10 +198,12 @@ class StreamEngine extends Module {
     val isCfgI = op === CFGI && valid
     val isCfgILimit = op === CFGILIMIT && valid
     val isCfgIRepeat = op === CFGIREPEAT && valid
+    val isCfgIOffset = op === CFGIOFFSET && valid
     val isCfgStream = (op === CFGLOAD || op=== CFGSTORE) && valid
     val isCfgStride = op === CFGSTRIDE && valid
     val isCfgTileStride = op === CFGTILESTRIDE && valid
     val isCfgReuse = op === CFGREUSE && valid
+    val isCfgReuseEmpty = op === CFGREUSEEMPTY && valid
     val isCal = op === CALSTREAM && valid
     val isCalRd = op === CALSTREAMRD && valid
 
@@ -214,6 +217,7 @@ class StreamEngine extends Module {
     val outerIter = src1(15,0)
     val cfgIlimit = src1
     val cfgIrepeat = src1
+    val cfgIoffset = src1
     val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst    
 
     //----------------- 1:CORE -------------------
@@ -235,6 +239,9 @@ class StreamEngine extends Module {
         specI(fifoId(Dst)).iRepeat := 0.U
         archI(fifoId(Dst)).iRepeat := 0.U
     }
+    when(isCfgIOffset){
+        iOffsetCfg(fifoId(Dst)) := cfgIoffset
+    }
     when(isCfgStream){
         addrCfg(fifoId(Dst)) := addr 
         addrDyn(fifoId(Dst)) := addr 
@@ -249,6 +256,21 @@ class StreamEngine extends Module {
     when(isCfgReuse){
         reuseCfg(fifoId(Dst)) := reusecnt
     }
+    //TODO:这里默认对1号流进行处理
+    val hasClearedLoadReady = RegInit(true.B)
+    when(isCfgReuseEmpty) {
+        hasClearedLoadReady := false.B
+    }
+    //repeat次数与复用次数相等，说明kernel刚好错开第一个lane，但此时第一个lane前面的word的复用次数并未消耗完，需要清空
+    when(specI(1).iRepeat === reuseCfg(1) && !hasClearedLoadReady) {
+        for (i <- 0 until fifoWord) { // 只有第一个lane会受影响，实际上这里应该用 fifoword/2
+            when(i.U < reuseCfg(1)) { // 对8点 16点 kernel 的支持
+                loadreadyMap(1)(i) := 0.U
+                archLoadReadyMap(1)(i) := 0.U //TODO：need think more carefully
+            }
+        }
+        hasClearedLoadReady := true.B
+    }
 
     //----------------- UPDATE I STATE -------------------
     def updateIState(
@@ -256,6 +278,7 @@ class StreamEngine extends Module {
       fireVec: Vec[Bool],
       iLimitCfg: UInt,
       iRepeatCfg: UInt,
+      iOffsetCfg: UInt,
     ): (dynIState, Vec[UInt]) = {
 
       val width = fireVec.length
@@ -276,7 +299,8 @@ class StreamEngine extends Module {
           nextState.iLimit  := state.iLimit + iLimitCfg
           nextState.iRepeat := 0.U
         }.otherwise {
-          nextState.iCnt    := sum - iLimitCfg
+          nextState.iCnt    := sum - iLimitCfg + iOffsetCfg
+          nextState.iLimit  := state.iLimit + iOffsetCfg
           nextState.iRepeat := state.iRepeat + 1.U
         }
       }
@@ -289,7 +313,7 @@ class StreamEngine extends Module {
         Mux(
           state.iRepeat + 1.U === iRepeatCfg,
           sum,
-          sum - iLimitCfg
+          sum - iLimitCfg + iOffsetCfg
         )
       )
     }
@@ -303,9 +327,10 @@ class StreamEngine extends Module {
         state        = specI(b),
         fireVec      = io.rdIter.fireStreamOp(b),
         iLimitCfg    = iLimitCfg(b),
-        iRepeatCfg   = iRepeatCfg(b)
+        iRepeatCfg   = iRepeatCfg(b),
+        iOffsetCfg   = iOffsetCfg(b)
       )
-      when(!isCfgI && !isCfgILimit && !isCfgIRepeat ){ // 配置指令不更新状态，其他指令才更新
+      when(!isCfgI && !isCfgILimit && !isCfgIRepeat && !isCfgIOffset ){ // 配置指令不更新状态，其他指令才更新 TODO:confuse
         specI(b) := nextState
         if(b == 0){
           when(io.rdIter.fireStreamOp(b).asUInt.orR){
@@ -331,9 +356,10 @@ class StreamEngine extends Module {
         state        = archI(b),
         fireVec      = io.cmt.fireStreamOp(b),
         iLimitCfg    = iLimitCfg(b),
-        iRepeatCfg   = iRepeatCfg(b)
+        iRepeatCfg   = iRepeatCfg(b),
+        iOffsetCfg   = iOffsetCfg(b)
       )
-      when(!isCfgI && !isCfgILimit && !isCfgIRepeat ){ // 配置指令不更新状态，其他指令才更新
+      when(!isCfgI && !isCfgILimit && !isCfgIRepeat && !isCfgIOffset ){ // 配置指令不更新状态，其他指令才更新
         archI(b) := nextArchState
       }
       if( b != 2 ){ //TODO: 当前仅对src0 src1恢复
