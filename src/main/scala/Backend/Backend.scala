@@ -31,6 +31,7 @@ class BackendBDBIO extends Bundle {
 
 class CommitStreamIO extends Bundle{
     val flush       = Input(Bool())
+    val robHead     = Input(new ClusterEntry(wrobQ, wdecode))
     val fireStreamOp = Input(Vec(3,Vec(ncommit,Bool()))) // use 0 | use 1 | use 2
     val fireStreamOpPP = Input(Vec(2,Vec(ncommit,Bool())))
     val iterCnt = Input(Vec(3,Vec(ncommit,UInt(32.W))))
@@ -94,6 +95,8 @@ class Backend extends Module {
     arIQ.io.wakeBus := wakeBus(0)
     arIQ.io.rplyBus := rplyBus
     arIQ.io.flush   := io.cmt.flush(0)
+    arIQ.io.commitPtr := io.cmt.stream.robHead
+
 
     // pipeline
     arPP.zipWithIndex.foreach{case(a, i) => 
@@ -129,6 +132,7 @@ class Backend extends Module {
     mdIQ.io.wakeBus := wakeBus(1)
     mdIQ.io.rplyBus := rplyBus
     mdIQ.io.flush   := io.cmt.flush(3)
+    mdIQ.io.commitPtr := io.cmt.stream.robHead
 
     // pipeline
     mdPP.io.rf          <> rf.io.original(3)
@@ -156,6 +160,8 @@ class Backend extends Module {
     lsIQ.io.wakeBus := wakeBus(2)
     lsIQ.io.rplyBus := rplyBus
     lsIQ.io.flush   := io.cmt.flush(4)
+    lsIQ.io.commitPtr := io.cmt.stream.robHead
+
 
     // pipeline
     lsPP.io.rf          <> rf.io.original(4)
@@ -221,4 +227,4 @@ class Backend extends Module {
     for (k <- 0 until lsuNiq){
         lsIQ.io.se(k).ready := true.B
     }
-}   
+}

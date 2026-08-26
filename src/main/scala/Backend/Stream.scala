@@ -157,6 +157,8 @@ class StreamEngine extends Module {
     val io = IO(new StreamEngineIO)
 
     val ppDecBase = RegInit(0.U(1.W))
+    val tagR = RegInit(false.B)
+    val cntInst = RegInit(0.U(32.W)) // TODO: CFG to 256
 
     val archPP = RegInit(VecInit.fill(2)(0.U.asTypeOf(new dynPPState)))
     val specPP = RegInit(VecInit.fill(2)(0.U.asTypeOf(new dynPPState)))
@@ -218,7 +220,8 @@ class StreamEngine extends Module {
     val cfgIlimit = src1
     val cfgIrepeat = src1
     val cfgIoffset = src1
-    val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst    
+    val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst
+    val rearm = isCfgI && fifoId(Dst) === 0.U
 
     //----------------- 1:CORE -------------------
     //config
@@ -228,6 +231,46 @@ class StreamEngine extends Module {
         streamMap(fifoId(Dst)) := 0.U
         lengthMap(fifoId(Dst)) := cfgLength / l2LineWord.U
         outerIterMap(fifoId(Dst)) := outerIter
+        // CFGI begins a new phase, but stateCfg still describes the previous
+        // phase's CFGLOAD.  Disable memory loading until the new CFGLOAD (or
+        // CFGAXILOAD) supplies this phase's base address; otherwise the FIFO
+        // is immediately refilled from the stale address after it is cleared.
+        stateCfg(fifoId(Dst)) := VecInit.fill(streamCfgBits)(false.B)
+        // A new CFGI starts an independent stream phase.  The iterator state
+        // was already reset above, so the memory-side progress counters must
+        // be reset with it; otherwise a second K=32 phase inherits the first
+        // phase's completed burst/outer-iteration state and cannot re-arm.
+        burstCntMap(fifoId(Dst)) := 0.U
+        oIterCntMap(fifoId(Dst)) := 0.U
+        // A completed phase can leave speculative/architectural reuse counts
+        // in the ping-pong FIFO maps.  CFGI is the phase boundary, so make both
+        // segments empty before CFGLOAD starts refilling the new address range.
+        for (b <- 0 until streamNum - 1) {
+            when(fifoId(Dst) === b.U) {
+                for (i <- 0 until fifoWord) {
+                    loadreadyMap(b)(i) := 0.U
+                    archLoadReadyMap(b)(i) := 0.U
+                }
+            }
+        }
+        when(fifoId(Dst) === 0.U) {
+            // CALSTREAMRD also uses the shared ping-pong iterator.  It used to
+            // reset only with CPU reset, which made a second stream phase start
+            // from the previous phase's PP position.
+            ppDecBase := 0.U
+            tagR := false.B
+            cntInst := 0.U
+            for (b <- 0 until 2) {
+                specPP(b).ppCnt := (2 * b).U
+                specPP(b).ppStride := 2.U
+                specPP(b).ppLimit := (2 * b + 2).U
+                specPP(b).ppStage := 0.U
+                archPP(b).ppCnt := (2 * b).U
+                archPP(b).ppStride := 2.U
+                archPP(b).ppLimit := (2 * b + 2).U
+                archPP(b).ppStage := 0.U
+            }
+        }
     }
     when(isCfgILimit){
         iLimitCfg(fifoId(Dst)) := cfgIlimit
@@ -332,25 +375,8 @@ class StreamEngine extends Module {
       )
       when(!isCfgI && !isCfgILimit && !isCfgIRepeat && !isCfgIOffset ){ // 配置指令不更新状态，其他指令才更新 TODO:confuse
         specI(b) := nextState
-        if(b == 0){
-          when(io.rdIter.fireStreamOp(b).asUInt.orR){
-            printf(p"\n\n---------------------- SRC --------------------------\n")
-            printf(p"specI$b: cnt=${specI(b).iCnt}, firenum=${PopCount(io.rdIter.fireStreamOp(b))},nextSpecI$b: cnt=${nextState.iCnt} \n")
-        }
-        }
       }
       io.rdIter.iterCnt(b) := iterCnt
-      for (i <- 0 until ndcd) {
-        when(io.rdIter.fireStreamOp(b)(i)) {
-          if(b == 0){
-            when(io.rdIter.fireStreamOpPP(Even)(i)){
-              printf(p"inst $i is LLL, src iter=${iterCnt(i)}\n");
-            }.otherwise{
-              printf(p"inst $i is LLR, src iter=${iterCnt(i)}\n");
-            }
-          }
-        }
-      }
       // COMMIT
       val (nextArchState, iterCntArch) = updateIState(
         state        = archI(b),
@@ -492,8 +518,6 @@ class StreamEngine extends Module {
     }
 
     // b = 0，流流流；b = 1，寄寄流
-    val tagR = RegInit(false.B)
-    val cntInst = RegInit(0.U(32.W))//TODO: CFG to 256
     for (b <- 0 until 2) {
       val (nextState, iterCnt, omitTag) = updatePPState(
         state       = specPP(b),
@@ -502,25 +526,10 @@ class StreamEngine extends Module {
         base        = ppBaseCfg(b),
         isOdd       = (b.U === Odd.U)
       )
-      when(initDone){
+      when(initDone && !rearm){
         specPP(b) := nextState
-        when(io.rdIter.fireStreamOpPP(b).asUInt.orR){
-            printf(p"---------------------- DST --------------------------\n")
-            printf(p"specPP$b: cnt=${specPP(b).ppCnt}, stride=${specPP(b).ppStride}, limit=${specPP(b).ppLimit}, stage=${specPP(b).ppStage}\n")
-            printf(p"firenum=${PopCount(io.rdIter.fireStreamOpPP(b))}, nextSpecPP$b: cnt=${nextState.ppCnt}, stride=${nextState.ppStride}, limit=${nextState.ppLimit}, stage=${nextState.ppStage}\n")
-        }
       }
       io.rdIter.iterCntPP(b) := iterCnt
-      for (i <- 0 until ndcd) {
-        when(io.rdIter.fireStreamOpPP(b)(i)) {
-          if (b == 0) {
-            printf(p"inst $i is LLL, wb iter=${io.rdIter.iterCntPP(b)(i)}\n")
-          }
-          else if (b == 1) {
-            printf(p"inst $i is RRL, wb iter=${io.rdIter.iterCntPP(b)(i)}\n")
-          }
-        }
-      }
       // COMMIT
       val (nextArchState, iterCntArch, archTag) = updatePPState(
         state       = archPP(b),
@@ -530,9 +539,11 @@ class StreamEngine extends Module {
         isOdd       = (b.U === Odd.U)
       )
       if(b == 0){
-        tagR := archTag//TODO
+        when(!rearm) {
+          tagR := archTag//TODO
+        }
       }
-      when(initDone){
+      when(initDone && !rearm){
         archPP(b) := nextArchState
       }
     }
@@ -548,10 +559,12 @@ class StreamEngine extends Module {
     val inc = PopCount((0 until ncommit).map(i => 
       io.cmt.fireStreamOpPP(0)(i) || io.cmt.fireStreamOpPP(1)(i)
     ))
-    cntInst := cntInst + inc
-    when(cntInst === 256.U){
-      cntInst := 0.U
-      ppDecBase := ~ppDecBase
+    when(!rearm) {
+      cntInst := cntInst + inc
+      when(cntInst === 256.U){
+        cntInst := 0.U
+        ppDecBase := ~ppDecBase
+      }
     }
 
     // Flush
@@ -559,9 +572,6 @@ class StreamEngine extends Module {
       specI := archI
       specPP := archPP
       loadreadyMap := archLoadReadyMap
-      printf(p"\n\n---------------------- FLUSH --------------------------\n")
-      printf(p"flush! specI0 cnt=${specI(0).iCnt}, specI1 cnt=${specI(1).iCnt}, archI0 cnt=${archI(0).iCnt},archI1 cnt=${archI(1).iCnt}\n")
-      printf(p"flush! specPP0 cnt=${specPP(0).ppCnt}, stage=${specPP(0).ppStage}, specPP1 cnt=${specPP(1).ppCnt}, stage=${specPP(1).ppStage}, archPP0 cnt=${archPP(0).ppCnt}, stage=${archPP(0).ppStage}, archPP1 cnt=${archPP(1).ppCnt}, stage=${archPP(1).ppStage}\n")
     }
 
 
@@ -613,7 +623,7 @@ class StreamEngine extends Module {
     val axiSize = 2.U
 
     //----------------- 2.1:READ -------------------
-    when(initDone && tagR){
+    when(initDone && tagR && !rearm){
       for (i <- 0 until 2){
         oIterCntMap(i) := oIterCntMap(i) - 1.U // TODO 0 < 1
         addrDyn(i) := addrCfg(i) + lengthMap(i) * tileStrideCfg(i) // TODO 只适用于奇数TODO
@@ -756,7 +766,6 @@ class StreamEngine extends Module {
         Fifo(loadFifoIdAXIReg)(wFifoAXIIdx) := io.mem.rdata
         loadreadyMap(loadFifoIdAXIReg)(wFifoAXIIdx) := reuseCfg(loadFifoIdAXIReg)
         archLoadReadyMap(loadFifoIdAXIReg)(wFifoAXIIdx) := reuseCfg(loadFifoIdAXIReg)
-        printf(p"FIFO $loadFifoIdAXIReg [$wFifoAXIIdx]=${io.mem.rdata} \n")
     }
 
     val wFifoIdx  = (loadWB.segSel * l2LineWord.U + loadWB.wordCnt)(log2Ceil(fifoWord)-1,0) 
@@ -764,7 +773,6 @@ class StreamEngine extends Module {
         Fifo(loadWB.fifoId)(wFifoIdx) := loadWB.rdata
         loadreadyMap(loadWB.fifoId)(wFifoIdx) := reuseCfg(loadWB.fifoId)
         archLoadReadyMap(loadWB.fifoId)(wFifoIdx) := reuseCfg(loadWB.fifoId)
-        printf(p"FIFO ${loadWB.fifoId}[$wFifoIdx]=${loadWB.rdata}(Mem[${loadWB.addr}])  \n")
     }
 
     //----------------- 2.2:WRITE -------------------

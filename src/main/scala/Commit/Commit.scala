@@ -126,11 +126,13 @@ class Commit extends Module {
         deq.valid := rob.io.cmt.deq(i).valid
         deq.bits  := rob.io.cmt.deq(i).bits
     }
+    io.dbg.robDeq.deqIdx := rob.io.cmt.deqIdx
     io.dbg.bdbDeq.deq.valid := bdb.io.cmt.deq.valid
     io.dbg.bdbDeq.deq.bits  := bdb.io.cmt.deq.bits
 
     // stream
     io.bke.stream.flush := ShiftRegister(flush, 1, false.B, true.B)
+    io.bke.stream.robHead := rob.io.cmt.deqIdx(0)
     for (i <- 0 until ncommit) {
         val instBits = rob.io.cmt.deq(i).bits
         val useBuffer = instBits.sinfo.useBuffer

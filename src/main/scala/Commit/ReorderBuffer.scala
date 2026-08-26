@@ -96,6 +96,7 @@ class ROBDispatchIO extends Bundle{
 
 class ROBCommitIO extends Bundle{
     val deq = Vec(ncommit, Decoupled(new ROBEntry))
+    val deqIdx = Output(Vec(ncommit, new ClusterEntry(wrobQ, wdecode)))
     val flush = Input(Bool())
 }
 class ReorderBufferIO extends Bundle{
@@ -110,6 +111,11 @@ class ReorderBuffer extends Module{
     val io = IO(new ReorderBufferIO)
 
     val q = Module(new ClusterIndexFIFO(new ROBEntry, nrob, ndcd, ncommit, arithNissue, nisplus))
+    io.cmt.deqIdx.zip(q.io.deqIdx).foreach { case (idx, deq) =>
+        idx.qidx := OHToUInt(deq.qidx)
+        idx.offset := OHToUInt(deq.offset)
+        idx.high := deq.high
+    }
     // 1. frontend: in dispatch stage, each instruction will enqueue into the ROB
     q.io.enq.zip(io.dsp.enq).foreach{case (enq, dsp) => enq <> dsp }
     io.dsp.enqIdx.zip(q.io.enqIdx).foreach{ case(idx, enq) =>

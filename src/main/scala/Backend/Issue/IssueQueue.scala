@@ -7,6 +7,7 @@ import ZirconConfig.Decode._
 import ZirconUtil._
 import Log2OH._
 import ZirconConfig.EXEOp._
+import ZirconConfig.Stream._
 
 class ReplayBusPkg extends Bundle {
     val prd     = UInt(wpreg.W)
@@ -109,6 +110,7 @@ class IssueQueueIO(ew: Int, dw: Int, num: Int) extends Bundle {
     val rplyBus = Input(new ReplayBusPkg)
     val stLeft  = Output(UInt(log2Ceil(num).W))
     val flush   = Input(Bool())
+    val commitPtr = Input(new ClusterEntry(wrobQ, wdecode))
     val dbg     = Output(new IssueQueueDBGIO)
     val se      = Vec(num, Flipped(new SEISSIO))
 }
@@ -201,7 +203,16 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
     fList.io.enq.foreach(_.bits := DontCare)
     for(i <- 0 until dw){
         // get the oldest valid existing instruction
-        val issueValid = iq(i).map{ case (e) => e.item.prAllWk && e.instExi }
+        val issueValid = iq(i).map{ case (e) => 
+            // Every Stream instruction mutates StreamEngine state that has no
+            // complete speculative checkpoint/rollback.  A CALSTREAM must not
+            // overtake an older CFGI/CFGLOAD either, so serialize configuration
+            // and calculation alike at the architectural ROB head.
+            val isStreamInst = e.item.sinfo.state(DONECFG)
+            val streamOrderReady = !isStreamInst ||
+                (e.item.robIdx.getAge === io.commitPtr.getAge)
+            e.item.prAllWk && e.instExi && streamOrderReady
+        }
         val issueAge   = iq(i).map{ case (e) => e.item.robIdx.getAge }
         val selectItem = VecInit.tabulate(len)(j => SelectItem(
             idxOH = (1 << j).U(len.W),
