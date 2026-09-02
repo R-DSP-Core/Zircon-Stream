@@ -5,6 +5,7 @@ import chisel3.util._
 object Stream {
     val iterNum   = 8
     val streamNum = 4
+    val streamAddrDims = 4
     val iterBits  = 3
     val fifoWord  = 2 * Cache.l2LineWord
     val fifoSegNum = fifoWord / Cache.l2LineWord
@@ -81,9 +82,11 @@ object EXEOp {
     val CALSTREAM = 0x2.U(stInstBits.W)
     val CALSTREAMPP = 0xC.U(stInstBits.W)
 
-    // // funct3 = 3, funct7 = 0,1
+    // funct3 = 3, funct7 = 0,1,2,3
     val CFGSTRIDE = 0x3.U(stInstBits.W)
     val CFGTILESTRIDE = 0xD.U(stInstBits.W)
+    val CFGDIMSIZE = 0xE.U(stInstBits.W)
+    val CFGDIMSTRIDE = 0xF.U(stInstBits.W)
 
 }
 

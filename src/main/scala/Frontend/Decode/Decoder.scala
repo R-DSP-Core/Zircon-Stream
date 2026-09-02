@@ -57,8 +57,12 @@ class Decoder extends Module{
         ))
     }.elsewhen(funct3 === 0x2.U){ //CALSTREAM
         io.sinfo.op := Mux(funct7 === 0x1.U, CALSTREAMPP, CALSTREAM)
-    }.elsewhen(funct3 === 0x3.U){ //CFGSTRIDE
-        io.sinfo.op := Mux(funct7 === 0x1.U, CFGTILESTRIDE, CFGSTRIDE)
+    }.elsewhen(funct3 === 0x3.U){ // stream address descriptor
+        io.sinfo.op := MuxCase(CFGSTRIDE, Seq(
+            (funct7 === 0x1.U) -> CFGTILESTRIDE,
+            (funct7 === 0x2.U) -> CFGDIMSIZE,
+            (funct7 === 0x3.U) -> CFGDIMSTRIDE
+        ))
     }.elsewhen(funct3 === 0x4.U){ //CFGREUSE
         io.sinfo.op := Mux(funct7 === 0x1.U, CFGREUSEEMPTY, CFGREUSE)
     }

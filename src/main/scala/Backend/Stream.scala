@@ -174,6 +174,15 @@ class StreamEngine extends Module {
     val addrDyn = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
     val strideCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
     val tileStrideCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W))) //fifo_id -> addr
+    val useDimAddr = RegInit(VecInit.fill(streamNum)(false.B))
+    val dimSizeCfg = RegInit(VecInit.fill(streamNum)(
+      VecInit.tabulate(streamAddrDims) { d =>
+        if (d == 0) l2LineWord.U(32.W) else 1.U(32.W)
+      }
+    ))
+    val dimStrideCfg = RegInit(VecInit.fill(streamNum)(VecInit.fill(streamAddrDims)(0.U(32.W))))
+    val dimCnt = RegInit(VecInit.fill(streamNum)(VecInit.fill(streamAddrDims)(0.U(32.W))))
+    val dimDone = RegInit(VecInit.fill(streamNum)(true.B))
     val reuseCfg = RegInit(VecInit.fill(streamNum)(0.U(counterWidth.W)))
     val stateCfg = RegInit(VecInit.fill(streamNum)(VecInit.fill(streamCfgBits)(false.B))) //fifo_id -> [doneCfg,isLoad,...]
 
@@ -202,6 +211,8 @@ class StreamEngine extends Module {
     val isCfgStream = (op === CFGLOAD || op=== CFGSTORE) && valid
     val isCfgStride = op === CFGSTRIDE && valid
     val isCfgTileStride = op === CFGTILESTRIDE && valid
+    val isCfgDimSize = op === CFGDIMSIZE && valid
+    val isCfgDimStride = op === CFGDIMSTRIDE && valid
     val isCfgReuse = op === CFGREUSE && valid
     val isCfgReuseEmpty = op === CFGREUSEEMPTY && valid
     val isCal = op === CALSTREAM && valid
@@ -218,7 +229,10 @@ class StreamEngine extends Module {
     val cfgIlimit = src1
     val cfgIrepeat = src1
     val cfgIoffset = src1
-    val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst    
+    val cfgDimSize = src1
+    val cfgDimStride = src1
+    val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst
+    val dimId = src2(streamBits + 1, streamBits)
 
     //----------------- 1:CORE -------------------
     //config
@@ -228,6 +242,8 @@ class StreamEngine extends Module {
         streamMap(fifoId(Dst)) := 0.U
         lengthMap(fifoId(Dst)) := cfgLength / l2LineWord.U
         outerIterMap(fifoId(Dst)) := outerIter
+        dimSizeCfg(fifoId(Dst))(1) := Mux(cfgLength / l2LineWord.U === 0.U, 1.U, cfgLength / l2LineWord.U)
+        dimSizeCfg(fifoId(Dst))(2) := Mux(outerIter === 0.U, 1.U, outerIter)
     }
     when(isCfgILimit){
         iLimitCfg(fifoId(Dst)) := cfgIlimit
@@ -243,15 +259,31 @@ class StreamEngine extends Module {
         iOffsetCfg(fifoId(Dst)) := cfgIoffset
     }
     when(isCfgStream){
-        addrCfg(fifoId(Dst)) := addr 
-        addrDyn(fifoId(Dst)) := addr 
+        addrCfg(fifoId(Dst)) := addr
+        addrDyn(fifoId(Dst)) := addr
         stateCfg(fifoId(Dst)) := ppBits.cfgState
+    }
+    when(op === CFGLOAD && valid) {
+        dimCnt(fifoId(Dst)) := VecInit.fill(streamAddrDims)(0.U(32.W))
+        dimDone(fifoId(Dst)) := false.B
+        burstCntMap(fifoId(Dst)) := 0.U
+        oIterCntMap(fifoId(Dst)) := 0.U
     }
     when(isCfgStride){
         strideCfg(fifoId(Dst)) := stride
+        dimStrideCfg(fifoId(Dst))(0) := stride
     }
     when(isCfgTileStride){
         tileStrideCfg(fifoId(Dst)) := tileStride
+        dimStrideCfg(fifoId(Dst))(1) := tileStride
+    }
+    when(isCfgDimSize && dimId =/= 0.U){
+        dimSizeCfg(fifoId(Dst))(dimId) := Mux(cfgDimSize === 0.U, 1.U, cfgDimSize)
+        useDimAddr(fifoId(Dst)) := true.B
+    }
+    when(isCfgDimStride){
+        dimStrideCfg(fifoId(Dst))(dimId) := cfgDimStride
+        useDimAddr(fifoId(Dst)) := true.B
     }
     when(isCfgReuse){
         reuseCfg(fifoId(Dst)) := reusecnt
@@ -270,6 +302,29 @@ class StreamEngine extends Module {
             }
         }
         hasClearedLoadReady := true.B
+    }
+
+    def lineBaseAddr(fifo: UInt): UInt = {
+      var result = addrCfg(fifo)
+      for (d <- 1 until streamAddrDims) {
+        result = (result + (dimCnt(fifo)(d) * dimStrideCfg(fifo)(d))(31, 0))(31, 0)
+      }
+      result
+    }
+
+    def advanceLine(fifo: UInt): Unit = {
+      val nextCnt = Wire(Vec(streamAddrDims, UInt(32.W)))
+      nextCnt := dimCnt(fifo)
+      var carry = true.B
+      for (d <- 1 until streamAddrDims) {
+        val last = dimCnt(fifo)(d) + 1.U >= dimSizeCfg(fifo)(d)
+        when(carry) {
+          nextCnt(d) := Mux(last, 0.U, dimCnt(fifo)(d) + 1.U)
+        }
+        carry = carry && last
+      }
+      dimCnt(fifo) := nextCnt
+      dimDone(fifo) := carry
     }
 
     //----------------- UPDATE I STATE -------------------
@@ -632,10 +687,10 @@ class StreamEngine extends Module {
           .slice(k*l2LineWord, (k+1)*l2LineWord)
           .map(_ === 0.U)
           .reduce(_ && _) &&
-        stateCfg(j)(DONECFG) && 
+        stateCfg(j)(DONECFG) &&
         stateCfg(j)(LDSTRAEM) &&
         (burstCntMap(j)(0) === k.U) &&
-        (oIterCntMap(j) =/= outerIterMap(j))
+        Mux(useDimAddr(j), !dimDone(j), oIterCntMap(j) =/= outerIterMap(j))
       }
     }
 
@@ -662,16 +717,21 @@ class StreamEngine extends Module {
         loadSegSelAXIReg := loadSegSelAXI
     }.elsewhen(io.mem.rreq && io.mem.rrsp && io.mem.rlast){
         loadValidAXIReg := false.B
-        val isWrap = (burstCntMap(loadFifoIdAXIReg) + 1.U) % lengthMap(loadFifoIdAXIReg) === 0.U
-        when(isWrap)
-        {
-            oIterCntMap(loadFifoIdAXIReg) :=oIterCntMap(loadFifoIdAXIReg) + 1.U
+        when(useDimAddr(loadFifoIdAXIReg)) {
+            advanceLine(loadFifoIdAXIReg)
+            burstCntMap(loadFifoIdAXIReg) := burstCntMap(loadFifoIdAXIReg) + 1.U
+        }.otherwise {
+            val isWrap = (burstCntMap(loadFifoIdAXIReg) + 1.U) % lengthMap(loadFifoIdAXIReg) === 0.U
+            when(isWrap)
+            {
+                oIterCntMap(loadFifoIdAXIReg) :=oIterCntMap(loadFifoIdAXIReg) + 1.U
+            }
+            addrDyn(loadFifoIdAXIReg)     := Mux(isWrap, addrCfg(loadFifoIdAXIReg), addrDyn(loadFifoIdAXIReg) + tileStrideCfg(loadFifoIdAXIReg))
+            burstCntMap(loadFifoIdAXIReg)  := burstCntMap(loadFifoIdAXIReg) + 1.U
         }
-        addrDyn(loadFifoIdAXIReg)     := Mux(isWrap, addrCfg(loadFifoIdAXIReg), addrDyn(loadFifoIdAXIReg) + tileStrideCfg(loadFifoIdAXIReg))
-        burstCntMap(loadFifoIdAXIReg)  := burstCntMap(loadFifoIdAXIReg) + 1.U
     }
     io.mem.rreq      := loadValidAXIReg
-    io.mem.raddr     := addrDyn(loadFifoIdAXIReg)
+    io.mem.raddr     := Mux(useDimAddr(loadFifoIdAXIReg), lineBaseAddr(loadFifoIdAXIReg), addrDyn(loadFifoIdAXIReg))
     io.mem.rlen      := axiLen
     io.mem.rsize     := axiSize
 
@@ -695,7 +755,11 @@ class StreamEngine extends Module {
     val loadValidReg      = RegInit(false.B)
     val loadFifoIdReg     = RegInit(0.U(streamBits.W))
     val loadSegSelReg     = RegInit(0.U(log2Ceil(fifoSegNum).W))
-    val loadAddr = addrDyn(loadFifoIdReg) + loadWordCnt * strideCfg(loadFifoIdReg)
+    val loadAddr = Mux(
+      useDimAddr(loadFifoIdReg),
+      lineBaseAddr(loadFifoIdReg) + loadWordCnt * dimStrideCfg(loadFifoIdReg)(0),
+      addrDyn(loadFifoIdReg) + loadWordCnt * strideCfg(loadFifoIdReg)
+    )
     val loadLastOne = loadWordCnt === (l2LineWord - 1).U 
     val l2AllowSEReq = !io.l2.miss && !io.l2.l2S1Valid && !io.l2.dcHazard
     val loadDone = loadLastOne && (io.l2.rreq && l2AllowSEReq)
@@ -719,13 +783,18 @@ class StreamEngine extends Module {
     }
 
     when(loadDone){
-        val isWrap = (burstCntMap(loadFifoIdReg) + 1.U) % lengthMap(loadFifoIdReg) === 0.U
-        when(isWrap)
-        {
-            oIterCntMap(loadFifoIdReg) :=oIterCntMap(loadFifoIdReg) + 1.U
+        when(useDimAddr(loadFifoIdReg)) {
+            advanceLine(loadFifoIdReg)
+            burstCntMap(loadFifoIdReg) := burstCntMap(loadFifoIdReg) + 1.U
+        }.otherwise {
+            val isWrap = (burstCntMap(loadFifoIdReg) + 1.U) % lengthMap(loadFifoIdReg) === 0.U
+            when(isWrap)
+            {
+                oIterCntMap(loadFifoIdReg) :=oIterCntMap(loadFifoIdReg) + 1.U
+            }
+            addrDyn(loadFifoIdReg)     := Mux(isWrap, addrCfg(loadFifoIdReg), addrDyn(loadFifoIdReg) + tileStrideCfg(loadFifoIdReg))
+            burstCntMap(loadFifoIdReg)  := burstCntMap(loadFifoIdReg) + 1.U
         }
-        addrDyn(loadFifoIdReg)     := Mux(isWrap, addrCfg(loadFifoIdReg), addrDyn(loadFifoIdReg) + tileStrideCfg(loadFifoIdReg))
-        burstCntMap(loadFifoIdReg)  := burstCntMap(loadFifoIdReg) + 1.U
     }
     io.l2.rreq      := loadValidReg
     io.l2.mtype     := 2.U //Dontcare
