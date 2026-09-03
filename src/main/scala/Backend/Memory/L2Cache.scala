@@ -124,6 +124,7 @@ class L2CacheIO extends Bundle {
     val mem = new MixedVec(Seq(new MemIO(true), new MemIO(false)))
     val se = Flipped(new SEL2IO)
     val dbg = Output(Vec(2, new L2CacheDBG))
+    val streamWrite = Output(new L2StreamWriteDBG)
 }
 
 class L2Cache extends Module {
@@ -249,15 +250,21 @@ class L2Cache extends Module {
     val rbufC2     = RegInit(0.U(l2LineBits.W))
     /* stage 1: receive the request, and arbitrate the request */
     io.se.l2S1Valid := io.dc.rreq || io.dc.wreq
+    val seS1Valid  = !io.se.l2S1Valid && (io.se.rreq || io.se.wreq)
     val s1Rreq     = io.dc.rreq || (!io.se.l2S1Valid && io.se.rreq)
+    val s1Wreq     = io.dc.wreq || (!io.se.l2S1Valid && io.se.wreq)
     val s1Uncache  = Mux(io.se.l2S1Valid, io.dc.uncache, false.B)
     val s1Paddr   = Mux(io.se.l2S1Valid, io.dc.paddr, io.se.paddr)
-    val c2s1       = (new L2Channel2Stage1Signal)(Mux(dcHazard, false.B, s1Rreq), Mux(dcHazard, false.B, io.dc.wreq), s1Uncache, s1Paddr, io.dc.mtype, io.dc.wdata, (!io.se.l2S1Valid && io.se.rreq))
+    val s1Mtype    = Mux(io.se.l2S1Valid, io.dc.mtype, io.se.mtype)
+    val s1Wdata    = Mux(io.se.l2S1Valid, io.dc.wdata, io.se.wdata)
+    val c2s1       = (new L2Channel2Stage1Signal)(Mux(dcHazard, false.B, s1Rreq), Mux(dcHazard, false.B, s1Wreq), s1Uncache, s1Paddr, s1Mtype, s1Wdata, seS1Valid)
     // Segreg1-2
     val c2s2       = ShiftRegister(c2s1, 1, 0.U.asTypeOf(new L2Channel2Stage1Signal), !missC2)
     /* stage 2: search the tag to determine hit or miss, as well as read the data from the line */
     val vldC2s2    = vldTab.map(_.rdata(1))
     val hitC2s2    = VecInit(tagTab.zip(vldC2s2).map{ case (tagt, vld) => vld && tagt.doutb === tag(c2s2.paddr)}).asUInt
+    val c2s2MissHazard = (c2s2.rreq || c2s2.wreq) &&
+      (c2s2.uncache || !hitC2s2(3, 2).orR)
     // miss update logic
     missC2         := Mux(fsmC2.io.cc.cmiss, false.B, Mux(missC2, missC2, (c2s2.rreq || c2s2.wreq) && (c2s2.uncache || !hitC2s2(3, 2).orR)))    
     val c2s3In     = (new L2Channel2Stage2Signal)(c2s2, VecInit(tagTab.map(_.doutb)), VecInit(dataTab.map(_.doutb).drop(2)), hitC2s2, lruTab(1).rdata(0))
@@ -279,7 +286,12 @@ class L2Cache extends Module {
     // wbuf
     when(fsmC2.io.cc.wbufWe){
         wbufC2.paddr := Mux(c2s3.uncache, c2s3.paddr, Mux1H(c2Lru, c2s3.rtag.drop(2)) ## index(c2s3.paddr) ## 0.U(l2Offset.W))
-        wbufC2.wdata := Mux(c2s3.uncache, 0.U((l2LineBits-32).W) ## c2s3.wdata, Mux1H(c2Lru, c2s3.rdata))
+        val victimData = Mux(
+          fsmC2.io.cc.wbufFromMem,
+          Mux1H(c2Lru, dataTab.map(_.doutb).drop(2)),
+          Mux1H(c2Lru, c2s3.rdata)
+        )
+        wbufC2.wdata := Mux(c2s3.uncache, 0.U((l2LineBits-32).W) ## c2s3.wdata, victimData)
     }.elsewhen(io.mem(1).wreq.get && io.mem(1).wrsp.get){
         wbufC2.wdata := wbufC2.wdata >> 32
     }
@@ -307,9 +319,13 @@ class L2Cache extends Module {
         dirtyt.wdata(0) := fsmC2.io.cc.drtyD.get(i)
     }
     // tag and mem
+    // As in DCache's commit-write pipeline, a younger STE write only needs a
+    // tag lookup while the older hit writes the data RAM in stage 3.
+    val pipelineSEWrite = c2s3.wreq && c2s3.seRreq && c2s1.wreq && c2s1.seRreq
+    val tagAddrOH = Mux(pipelineSEWrite, 1.U(3.W), fsmC2.io.cc.addrOH)
     tagTab.zipWithIndex.foreach{ case (tagt, i) =>
-        tagt.addrb  := Mux1H(fsmC2.io.cc.addrOH, VecInit(index(c2s1.paddr), index(c2s2.paddr), index(c2s3.paddr)))
-        tagt.enb    := Mux1H(fsmC2.io.cc.addrOH, VecInit(c2s1.rreq || c2s1.wreq, c2s2.rreq || c2s2.wreq, c2s3.rreq || c2s3.wreq))
+        tagt.addrb  := Mux1H(tagAddrOH, VecInit(index(c2s1.paddr), index(c2s2.paddr), index(c2s3.paddr)))
+        tagt.enb    := Mux1H(tagAddrOH, VecInit(c2s1.rreq || c2s1.wreq, c2s2.rreq || c2s2.wreq, c2s3.rreq || c2s3.wreq))
         tagt.dinb   := tag(c2s3.paddr)
         tagt.web    := (if(i >= 2) fsmC2.io.cc.tagvWe(i-2) else false.B)
     }
@@ -331,7 +347,12 @@ class L2Cache extends Module {
                                         (Mux1H(fsmC2.io.cc.r1H, VecInit(rdataMem, wdataRbuf)).asTypeOf(Vec(l2LineBits / l1LineBits, UInt(l1LineBits.W))))(c2s3.paddr(l2Offset-1, l1Offset)))
     io.dc.wrsp          := !missC2 && c2s3.wreq
     io.se.rrsp         := !missC2 && c2s3.rreq && c2s3.seRreq
+    io.se.wrsp         := !missC2 && c2s3.wreq && c2s3.seRreq
     io.se.rdata        := (Mux1H(fsmC2.io.cc.r1H, VecInit(rdataMem, wdataRbuf)).asTypeOf(Vec(l2LineBits / 32, UInt(32.W))))(c2s3.paddr(l2Offset-1, 2))
+    io.streamWrite.valid := io.se.wrsp
+    io.streamWrite.paddr := c2s3.paddr
+    io.streamWrite.wdata := c2s3.wdata
+    io.streamWrite.wstrb := MTypeDecode(c2s3.mtype)
     io.mem(1).rreq      := fsmC2.io.mem.rreq
     io.mem(1).raddr     := tag(c2s3.paddr) ## index(c2s3.paddr) ## Mux(c2s3.uncache, offset(c2s3.paddr), 0.U(l2Offset.W))
     io.mem(1).rlen      := Mux(c2s3.uncache, 0.U, (l2LineBits / 32 - 1).U)
@@ -345,7 +366,12 @@ class L2Cache extends Module {
     io.mem(1).wstrb.get := Mux(c2s3.uncache, mtype << wbufC2.paddr(1, 0), 0xf.U)
 
     /* related check: */
-    dcHazard := c2s3.wreq
+    val seWriteSelected = !io.se.l2S1Valid && io.se.wreq
+    val allowSEWritePipeline = !missC2 && c2s3.wreq && c2s3.seRreq && seWriteSelected
+    // Block reads and source changes behind a stage-3 write. Consecutive STE
+    // writes may continue because tag lookup and data write use separate RAMs.
+    // Stop immediately on an S2 miss so no younger request escapes the freeze.
+    dcHazard := c2s2MissHazard || (c2s3.wreq && !allowSEWritePipeline)
 
     // 对于dc和se，其实需要给的miss信号是一致的
     io.ic.miss := missC1 || icHazard

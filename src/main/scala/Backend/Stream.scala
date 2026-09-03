@@ -76,6 +76,9 @@ class SEL2IO extends Bundle {
     val rreq        = Output(Bool())
     val rrsp        = Input(Bool())
     val rdata       = Input(UInt(32.W))
+    val wreq        = Output(Bool())
+    val wrsp        = Input(Bool())
+    val wdata       = Output(UInt(32.W))
     val paddr       = Output(UInt(32.W))
     val mtype       = Output(UInt(2.W))
     val miss        = Input(Bool())
@@ -189,8 +192,30 @@ class StreamEngine extends Module {
     val loadreadyMap = RegInit(VecInit.fill(streamNum-1)(VecInit.fill(fifoWord)(0.U(counterWidth.W))))
     val archLoadReadyMap = RegInit(VecInit.fill(streamNum-1)(VecInit.fill(fifoWord)(0.U(counterWidth.W))))
 
-    val storereadyMap = RegInit(VecInit.fill(fifoWord)(false.B))
+    val storereadyMap = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(false.B)))
     val Fifo = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(0.U(32.W))))  //fifo_id,itercnt -> data
+
+    // FIFO3 is a load-to-store layout buffer. Its load and store descriptors are
+    // snapshotted independently so later store configuration cannot disturb an
+    // in-flight AXI fill.
+    val layoutLoadActive = RegInit(false.B)
+    val layoutLoadDone = RegInit(true.B)
+    val layoutLoadBase = RegInit(0.U(32.W))
+    val layoutLoadDimSize = RegInit(VecInit.tabulate(streamAddrDims) { d =>
+      if (d == 0) l2LineWord.U(32.W) else 1.U(32.W)
+    })
+    val layoutLoadDimStride = RegInit(VecInit.fill(streamAddrDims)(0.U(32.W)))
+    val layoutLoadDimCnt = RegInit(VecInit.fill(streamAddrDims)(0.U(32.W)))
+
+    val layoutStoreActive = RegInit(false.B)
+    val layoutStoreBase = RegInit(0.U(32.W))
+    val layoutStoreDimSize = RegInit(VecInit.tabulate(streamAddrDims) { d =>
+      if (d == 0) l2LineWord.U(32.W) else 1.U(32.W)
+    })
+    val layoutStoreDimStride = RegInit(VecInit.fill(streamAddrDims)(0.U(32.W)))
+    val layoutStoreDimCnt = RegInit(VecInit.fill(streamAddrDims)(0.U(32.W)))
+    val layoutStoreReadIdx = RegInit(0.U(log2Ceil(fifoWord).W))
+    val layoutStoreLineActive = RegInit(false.B)
 
     val lengthMap = RegInit(VecInit.fill(streamNum)(0.U(16.W))) //fifo_id -> load length
     val burstCntMap = RegInit(VecInit.fill(streamNum)(0.U(16.W))) //fifo_id -> load cnt
@@ -233,6 +258,8 @@ class StreamEngine extends Module {
     val cfgDimStride = src1
     val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst
     val dimId = src2(streamBits + 1, streamBits)
+    val isLayoutLoad = op === CFGLOAD && valid && fifoId(Dst) === Layout.U
+    val isLayoutStore = op === CFGSTORE && valid && fifoId(Dst) === Layout.U
 
     //----------------- 1:CORE -------------------
     //config
@@ -258,10 +285,30 @@ class StreamEngine extends Module {
     when(isCfgIOffset){
         iOffsetCfg(fifoId(Dst)) := cfgIoffset
     }
-    when(isCfgStream){
+    when(isCfgStream && !isLayoutStore){
         addrCfg(fifoId(Dst)) := addr
         addrDyn(fifoId(Dst)) := addr
         stateCfg(fifoId(Dst)) := ppBits.cfgState
+    }
+    when(isLayoutLoad) {
+        layoutLoadActive := ppBits.cfgState(LDAXISTREAM)
+        layoutLoadDone := false.B
+        layoutLoadBase := addr
+        layoutLoadDimSize := dimSizeCfg(Layout)
+        layoutLoadDimStride := dimStrideCfg(Layout)
+        layoutLoadDimCnt := VecInit.fill(streamAddrDims)(0.U(32.W))
+        layoutStoreActive := false.B
+        layoutStoreReadIdx := 0.U
+        layoutStoreLineActive := false.B
+        storereadyMap(Layout) := VecInit.fill(fifoWord)(false.B)
+    }
+    when(isLayoutStore) {
+        layoutStoreActive := true.B
+        layoutStoreBase := addr
+        layoutStoreDimSize := dimSizeCfg(Layout)
+        layoutStoreDimStride := dimStrideCfg(Layout)
+        layoutStoreDimCnt := VecInit.fill(streamAddrDims)(0.U(32.W))
+        layoutStoreLineActive := false.B
     }
     when(op === CFGLOAD && valid) {
         dimCnt(fifoId(Dst)) := VecInit.fill(streamAddrDims)(0.U(32.W))
@@ -325,6 +372,51 @@ class StreamEngine extends Module {
       }
       dimCnt(fifo) := nextCnt
       dimDone(fifo) := carry
+    }
+
+    def layoutLoadLineBaseAddr(): UInt = {
+      var result = layoutLoadBase
+      for (d <- 1 until streamAddrDims) {
+        result = (result + (layoutLoadDimCnt(d) * layoutLoadDimStride(d))(31, 0))(31, 0)
+      }
+      result
+    }
+
+    def advanceLayoutLoadLine(): Unit = {
+      val nextCnt = Wire(Vec(streamAddrDims, UInt(32.W)))
+      nextCnt := layoutLoadDimCnt
+      var carry = true.B
+      for (d <- 1 until streamAddrDims) {
+        val last = layoutLoadDimCnt(d) + 1.U >= layoutLoadDimSize(d)
+        when(carry) {
+          nextCnt(d) := Mux(last, 0.U, layoutLoadDimCnt(d) + 1.U)
+        }
+        carry = carry && last
+      }
+      layoutLoadDimCnt := nextCnt
+      layoutLoadDone := carry
+    }
+
+    def layoutStoreAddr(): UInt = {
+      var result = layoutStoreBase
+      for (d <- 0 until streamAddrDims) {
+        result = (result + (layoutStoreDimCnt(d) * layoutStoreDimStride(d))(31, 0))(31, 0)
+      }
+      result
+    }
+
+    def advanceLayoutStoreWord(): Unit = {
+      val nextCnt = Wire(Vec(streamAddrDims, UInt(32.W)))
+      nextCnt := layoutStoreDimCnt
+      var carry = true.B
+      for (d <- 0 until streamAddrDims) {
+        val last = layoutStoreDimCnt(d) + 1.U >= layoutStoreDimSize(d)
+        when(carry) {
+          nextCnt(d) := Mux(last, 0.U, layoutStoreDimCnt(d) + 1.U)
+        }
+        carry = carry && last
+      }
+      layoutStoreDimCnt := nextCnt
     }
 
     //----------------- UPDATE I STATE -------------------
@@ -631,7 +723,7 @@ class StreamEngine extends Module {
         io.iss(i).ready :=  io.iss(i).isCalStream &
                           (loadreadyMap(0)(issWordIdx(0)) =/= 0.U || !io.iss(i).useBuffer(0)) &
                           (loadreadyMap(1)(issWordIdx(1)) =/= 0.U || !io.iss(i).useBuffer(1)) &
-                          (!storereadyMap(issWordIdx(2)) || !io.iss(i).useBuffer(2)) & ppRdy
+                          (!storereadyMap(Dst)(issWordIdx(2)) || !io.iss(i).useBuffer(2)) & ppRdy
     }
 
     // ReadOp stage + writeback stage
@@ -652,7 +744,7 @@ class StreamEngine extends Module {
             when(io.wb(i).useBuffer(2)){
                 val wbWordIdx = (io.wb(i).iterCnt(2) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
                 Fifo(2)(wbWordIdx) := io.wb(i).wdata
-                storereadyMap(wbWordIdx) := true.B 
+                storereadyMap(Dst)(wbWordIdx) := true.B
             }
             when(io.wb(i).usePPBuffer){
                 val (ppId, ppIdx) = getPP(io.wb(i).iterCnt(2), ppDecBase)
@@ -694,6 +786,18 @@ class StreamEngine extends Module {
       }
     }
 
+    val layoutSegEmpty = VecInit.tabulate(fifoSegNum) { k =>
+      storereadyMap(Layout)
+        .slice(k*l2LineWord, (k+1)*l2LineWord)
+        .map(bit => !bit)
+        .reduce(_ && _) &&
+      layoutLoadActive &&
+      !layoutLoadDone &&
+      (burstCntMap(Layout)(0) === k.U)
+    }
+    val layoutLoadValid = layoutSegEmpty.asUInt.orR
+    val layoutLoadSegSel = PriorityEncoder(layoutSegEmpty)
+
     // ---- AXI ----
     val fifoSegEmptyAXI = fifoSegEmptyBase.zipWithIndex.map { case (seg, j) =>
         Mux(stateCfg(j)(LDAXISTREAM), seg, VecInit.fill(fifoSegNum)(false.B))}
@@ -701,9 +805,12 @@ class StreamEngine extends Module {
     loadSelAXI.io.fifoSegEmpty := fifoSegEmptyAXI
     loadSelAXI.io.burstCntMap  := burstCntMap
     val loadWordCntAXI     = RegInit(0.U((l2Offset-2).W)) // word cnt
-    val loadValidAXI  = loadSelAXI.io.loadValid
-    val loadFifoIdAXI = loadSelAXI.io.loadFifoId
-    val loadSegSelAXI = loadSelAXI.io.loadSegSel
+    val legacyLoadValidAXI  = loadSelAXI.io.loadValid
+    val chooseLayoutAXI = layoutLoadValid &&
+      (!legacyLoadValidAXI || burstCntMap(Layout) < burstCntMap(loadSelAXI.io.loadFifoId))
+    val loadValidAXI  = legacyLoadValidAXI || layoutLoadValid
+    val loadFifoIdAXI = Mux(chooseLayoutAXI, Layout.U, loadSelAXI.io.loadFifoId)
+    val loadSegSelAXI = Mux(chooseLayoutAXI, layoutLoadSegSel, loadSelAXI.io.loadSegSel)
     val loadValidAXIReg      = RegInit(false.B)
     val loadFifoIdAXIReg     = RegInit(0.U(streamBits.W))
     val loadSegSelAXIReg     = RegInit(0.U(log2Ceil(fifoSegNum).W))
@@ -717,7 +824,10 @@ class StreamEngine extends Module {
         loadSegSelAXIReg := loadSegSelAXI
     }.elsewhen(io.mem.rreq && io.mem.rrsp && io.mem.rlast){
         loadValidAXIReg := false.B
-        when(useDimAddr(loadFifoIdAXIReg)) {
+        when(loadFifoIdAXIReg === Layout.U) {
+            advanceLayoutLoadLine()
+            burstCntMap(Layout) := burstCntMap(Layout) + 1.U
+        }.elsewhen(useDimAddr(loadFifoIdAXIReg)) {
             advanceLine(loadFifoIdAXIReg)
             burstCntMap(loadFifoIdAXIReg) := burstCntMap(loadFifoIdAXIReg) + 1.U
         }.otherwise {
@@ -731,7 +841,11 @@ class StreamEngine extends Module {
         }
     }
     io.mem.rreq      := loadValidAXIReg
-    io.mem.raddr     := Mux(useDimAddr(loadFifoIdAXIReg), lineBaseAddr(loadFifoIdAXIReg), addrDyn(loadFifoIdAXIReg))
+    io.mem.raddr     := Mux(
+      loadFifoIdAXIReg === Layout.U,
+      layoutLoadLineBaseAddr(),
+      Mux(useDimAddr(loadFifoIdAXIReg), lineBaseAddr(loadFifoIdAXIReg), addrDyn(loadFifoIdAXIReg))
+    )
     io.mem.rlen      := axiLen
     io.mem.rsize     := axiSize
 
@@ -796,13 +910,35 @@ class StreamEngine extends Module {
             burstCntMap(loadFifoIdReg)  := burstCntMap(loadFifoIdReg) + 1.U
         }
     }
-    io.l2.rreq      := loadValidReg
-    io.l2.mtype     := 2.U //Dontcare
-    io.l2.paddr     := loadAddr
+    val layoutStoreSegFull = VecInit.tabulate(fifoSegNum) { k =>
+      storereadyMap(Layout)
+        .slice(k*l2LineWord, (k+1)*l2LineWord)
+        .reduce(_ && _)
+    }
+    val layoutStoreSegIdx = layoutStoreReadIdx(log2Ceil(fifoWord)-1, log2Ceil(l2LineWord))
+    val layoutStoreLineReady = layoutStoreSegFull(layoutStoreSegIdx)
+    val layoutStoreReq = layoutStoreActive &&
+      (layoutStoreLineActive || layoutStoreLineReady)
+    val layoutStoreFire = layoutStoreReq && l2AllowSEReq
+
+    // Match the DCache-to-L2 write pipeline: once L2 accepts S1, it owns the
+    // word, so FIFO3 can advance without waiting for the later write response.
+    io.l2.rreq      := loadValidReg && !layoutStoreReq
+    io.l2.wreq      := layoutStoreReq
+    io.l2.wdata     := Fifo(Layout)(layoutStoreReadIdx)
+    io.l2.mtype     := 2.U // 32-bit word write
+    io.l2.paddr     := Mux(layoutStoreReq, layoutStoreAddr(), loadAddr)
+    when(layoutStoreFire) {
+        storereadyMap(Layout)(layoutStoreReadIdx) := false.B
+        layoutStoreReadIdx := layoutStoreReadIdx + 1.U
+        layoutStoreLineActive :=
+          layoutStoreReadIdx(log2Ceil(l2LineWord)-1, 0) =/= (l2LineWord - 1).U
+        advanceLayoutStoreWord()
+    }
     // DCache Stage 1
     val loadD1 = WireDefault(ShiftRegister(
-        Mux(!io.l2.l2S1Valid && !io.l2.dcHazard, 
-        (new loadPPBundle)(loadWordCnt, loadFifoIdReg, loadSegSelReg, loadAddr, loadValidReg, 0.U(32.W)),
+        Mux(io.l2.rreq && !io.l2.l2S1Valid && !io.l2.dcHazard,
+        (new loadPPBundle)(loadWordCnt, loadFifoIdReg, loadSegSelReg, loadAddr, io.l2.rreq, 0.U(32.W)),
         0.U.asTypeOf(new loadPPBundle)),
         1, 
         0.U.asTypeOf(new loadPPBundle), 
@@ -820,11 +956,15 @@ class StreamEngine extends Module {
     loadWB.rdata := l2RdataWB
 
     // refill FIFO
-    val wFifoAXIIdx  = (loadSegSelAXIReg * l2LineWord.U + loadWordCntAXI)(log2Ceil(fifoWord)-1,0) 
+    val wFifoAXIIdx  = (loadSegSelAXIReg * l2LineWord.U + loadWordCntAXI)(log2Ceil(fifoWord)-1,0)
     when(io.mem.rreq && io.mem.rrsp ) {
         Fifo(loadFifoIdAXIReg)(wFifoAXIIdx) := io.mem.rdata
-        loadreadyMap(loadFifoIdAXIReg)(wFifoAXIIdx) := reuseCfg(loadFifoIdAXIReg)
-        archLoadReadyMap(loadFifoIdAXIReg)(wFifoAXIIdx) := reuseCfg(loadFifoIdAXIReg)
+        when(loadFifoIdAXIReg === Layout.U) {
+            storereadyMap(Layout)(wFifoAXIIdx) := true.B
+        }.otherwise {
+            loadreadyMap(loadFifoIdAXIReg)(wFifoAXIIdx) := reuseCfg(loadFifoIdAXIReg)
+            archLoadReadyMap(loadFifoIdAXIReg)(wFifoAXIIdx) := reuseCfg(loadFifoIdAXIReg)
+        }
         printf(p"FIFO $loadFifoIdAXIReg [$wFifoAXIIdx]=${io.mem.rdata} \n")
     }
 
@@ -837,9 +977,11 @@ class StreamEngine extends Module {
     }
 
     //----------------- 2.2:WRITE -------------------
-    val storeFifoId = 2
+    // FIFO2 remains the legacy AXI store. FIFO3 is drained independently by
+    // layoutStoreReq through L2, so the two paths need no store arbitration.
+    val storeFifoId = Dst
 
-    val wFifoSegFull = VecInit.tabulate(fifoSegNum){ k=> storereadyMap.slice(k*l2LineWord, (k+1)*l2LineWord).reduce(_ && _) }
+    val wFifoSegFull = VecInit.tabulate(fifoSegNum){ k=> storereadyMap(Dst).slice(k*l2LineWord, (k+1)*l2LineWord).reduce(_ && _) }
     val storeSegSel = PriorityEncoder(wFifoSegFull)
     val storeValid = stateCfg(storeFifoId)(DONECFG) && !stateCfg(storeFifoId)(LDSTRAEM) && wFifoSegFull.asUInt.orR
     
@@ -849,7 +991,7 @@ class StreamEngine extends Module {
     val storeFifoIdx  = (storeSegSelReg * l2LineWord.U + storeWordCnt)(log2Ceil(fifoWord)-1,0) 
     when (io.mem.wreq && io.mem.wrsp){
         storeWordCnt := storeWordCnt + 1.U
-        storereadyMap(storeFifoIdx):=false.B
+        storereadyMap(Dst)(storeFifoIdx):=false.B
         //printf(p"STORE FIFO | id = $storeFifoId | idx = $storeFifoIdx | value = ${io.mem.wdata.get}\n")
     }
     when(!storeValidReg){

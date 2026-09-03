@@ -27,6 +27,7 @@ object FifoRole {
   val Src0 = 0
   val Src1 = 1
   val Dst  = 2
+  val Layout = 3
 }
 
 object EXEOp {

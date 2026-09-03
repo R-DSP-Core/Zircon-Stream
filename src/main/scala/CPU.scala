@@ -11,6 +11,7 @@ class CPUDebugIO extends Bundle {
     val fte = new FrontendDBGIO
     val bke = new BackendDBGIO
     val l2  = Output(Vec(2, new L2CacheDBG))
+    val streamWrite = Output(new L2StreamWriteDBG)
     val axi = new AXIDebugIO
     val dcProfiling = new DCacheProfilingDBG
 }
@@ -60,6 +61,7 @@ class CPU(sim: Boolean = false) extends Module {
         io.dbg.get.fte <> fte.io.dbg
         io.dbg.get.bke <> bke.io.dbg
         io.dbg.get.l2  <> l2.io.dbg
+        io.dbg.get.streamWrite := l2.io.streamWrite
         io.dbg.get.axi <> arb.io.dbg 
         io.dbg.get.dcProfiling := bke.io.dcProfiling
     }

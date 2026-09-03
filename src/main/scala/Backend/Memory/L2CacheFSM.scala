@@ -15,6 +15,7 @@ class L2CacheFSMCacheIO(ic: Boolean) extends Bundle {
     val r1H     = Output(UInt(2.W))
     // write buffer
     val wbufWe  = Output(Bool())
+    val wbufFromMem = Output(Bool())
     // lru
     val lru     = Input(UInt(2.W))
     val lruUpd  = Output(UInt(2.W))
@@ -37,6 +38,13 @@ class L2CacheFSMMEMIO(ic: Boolean) extends Bundle {
 
 class L2CacheDBG extends CacheDBG
 
+class L2StreamWriteDBG extends Bundle {
+    val valid = Bool()
+    val paddr = UInt(32.W)
+    val wdata = UInt(32.W)
+    val wstrb = UInt(4.W)
+}
+
 class L2CacheFSMIO(ic: Boolean) extends Bundle {
     val cc  = new L2CacheFSMCacheIO(ic)
     val mem = new L2CacheFSMMEMIO(ic)
@@ -49,7 +57,7 @@ class L2CacheFSM(ic: Boolean = false) extends Module{
     val iom     = io.mem
     val iocWreq = ioc.wreq.getOrElse(false.B)
     // main fsm: for read
-    val mIdle :: mMiss :: mRefill :: mWait ::  Nil = Enum(4)
+    val mIdle :: mVictim :: mMiss :: mRefill :: mWait :: Nil = Enum(5)
     val mState   = RegInit(mIdle)
 
     val cmiss    = WireDefault(false.B)
@@ -66,6 +74,7 @@ class L2CacheFSM(ic: Boolean = false) extends Module{
     val wfsmRst  = WireDefault(false.B)
     val wfsmOk   = WireDefault(false.B)
     val wbufWe   = WireDefault(false.B)
+    val wbufFromMem = WireDefault(false.B)
 
     val lru      = RegInit(0.U(2.W))
 
@@ -87,9 +96,23 @@ class L2CacheFSM(ic: Boolean = false) extends Module{
                     wfsmEn := true.B
                     wbufWe := true.B
                 }.elsewhen(!hit){ // cache but !hit
-                    mState := mMiss
-                    wfsmEn := true.B
-                    wbufWe := true.B
+                    if(ic) {
+                        mState := mMiss
+                        wfsmEn := true.B
+                        wbufWe := true.B
+                    } else {
+                        when(iocWreq) {
+                            // A pipelined write may share this cycle with an
+                            // older data-array write. Read the victim again
+                            // before starting writeback on a write miss.
+                            mState := mVictim
+                            addrOH := 4.U
+                        }.otherwise {
+                            mState := mMiss
+                            wfsmEn := true.B
+                            wbufWe := true.B
+                        }
+                    }
                     lru    := ioc.lru
                 }.otherwise{ // cache and hit
                     mState := mIdle
@@ -104,6 +127,13 @@ class L2CacheFSM(ic: Boolean = false) extends Module{
                     }
                 }
             }
+        }
+        is(mVictim) {
+            mState := mMiss
+            addrOH := 4.U
+            wfsmEn := true.B
+            wbufWe := true.B
+            wbufFromMem := true.B
         }
         is(mMiss){
             io.mem.rreq := true.B
@@ -146,6 +176,7 @@ class L2CacheFSM(ic: Boolean = false) extends Module{
     io.cc.addrOH := addrOH
     io.cc.r1H    := r1H
     io.cc.wbufWe := wbufWe
+    io.cc.wbufFromMem := wbufFromMem
     if(!ic){
         io.cc.drtyWe.get := drtyWe
         io.cc.drtyD.get  := drtyD
@@ -189,4 +220,4 @@ class L2CacheFSM(ic: Boolean = false) extends Module{
             }
         }
     }
-}   
+}
