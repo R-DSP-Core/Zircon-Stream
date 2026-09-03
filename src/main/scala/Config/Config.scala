@@ -4,7 +4,8 @@ import chisel3.util._
 
 object Stream {
     val iterNum   = 8
-    val streamNum = 4
+    val streamNum = 6
+    val computeStreamNum = 2
     val streamAddrDims = 4
     val iterBits  = 3
     val fifoWord  = 2 * Cache.l2LineWord
@@ -28,6 +29,8 @@ object FifoRole {
   val Src1 = 1
   val Dst  = 2
   val Layout = 3
+  val ComputeX = 4
+  val ComputeY = 5
 }
 
 object EXEOp {

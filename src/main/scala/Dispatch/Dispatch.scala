@@ -3,6 +3,7 @@ import chisel3.util._
 import ZirconConfig.Decode._
 import ZirconConfig.Issue._
 import ZirconConfig.Stream._
+import ZirconConfig.FifoRole._
 import ZirconUtil._
 
 
@@ -11,8 +12,10 @@ import ZirconUtil._
 // 输入： iter的值
 // 把正确的 iter值带着，进入IQ
 class SERdIterIO extends Bundle{
-    val fireStreamOp = Output(Vec(3,Vec(ndcd,Bool())))
-    val iterCnt =       Input(Vec(3,Vec(ndcd,UInt(32.W))))
+    val fireStreamOp = Output(Vec(streamNum,Vec(ndcd,Bool())))
+    val iterCnt =       Input(Vec(streamNum,Vec(ndcd,UInt(32.W))))
+    val fireComputeWrite = Output(Vec(computeStreamNum, Vec(ndcd, Bool())))
+    val computeWriteIterCnt = Input(Vec(computeStreamNum, Vec(ndcd, UInt(32.W))))
     val fireStreamOpPP = Output(Vec(2,Vec(ndcd,Bool())))
     val iterCntPP =       Input(Vec(2,Vec(ndcd,UInt(32.W))))
 }
@@ -44,29 +47,47 @@ class Dispatch extends Module {
         val instBits = io.fte.instPkg(i).bits
         val useBuffer = instBits.sinfo.useBuffer
         val usePPBuffer = instBits.sinfo.usePPBuffer
+        val fifoId = instBits.sinfo.fifoId
         val fireStream = instBits.isCalStream && io.cmt.rob.enq(i).fire
-        for (b <- 0 until 3) {
-          io.seRIter.fireStreamOp(b)(i) := fireStream && useBuffer(b)
+        val computeDst = fifoId(2) === ComputeX.U || fifoId(2) === ComputeY.U
+        for (b <- 0 until streamNum) {
+          val read = useBuffer(0) && fifoId(0) === b.U ||
+                     useBuffer(1) && fifoId(1) === b.U
+          val normalWrite = useBuffer(2) && !computeDst && fifoId(2) === b.U
+          io.seRIter.fireStreamOp(b)(i) := fireStream && (read || normalWrite)
+        }
+        for (b <- 0 until computeStreamNum) {
+          io.seRIter.fireComputeWrite(b)(i) := fireStream && useBuffer(2) && fifoId(2) === (ComputeX + b).U
         }
         for (k <- 0 until 2) {
           io.seRIter.fireStreamOpPP(k)(i) := fireStream && usePPBuffer(k)
         }
     }     
     
+    val streamIter = VecInit.tabulate(streamNum) { b =>
+      genIter(io.seRIter.fireStreamOp(b), io.seRIter.iterCnt(b))
+    }
+    val computeWriteIter = VecInit.tabulate(computeStreamNum) { b =>
+      genIter(io.seRIter.fireComputeWrite(b), io.seRIter.computeWriteIterCnt(b))
+    }
     val seIter = WireInit(VecInit.fill(3)(VecInit.fill(ndcd)(0.U(32.W))))
-    // src正常根据 01号索引表获取
-    for (b <- 0 until 2) {
-      seIter(b) := genIter(io.seRIter.fireStreamOp(b), io.seRIter.iterCnt(b))
+    for (i <- 0 until ndcd) {
+      val fifoId = io.fte.instPkg(i).bits.sinfo.fifoId
+      seIter(0)(i) := streamIter(fifoId(0))(i)
+      seIter(1)(i) := streamIter(fifoId(1))(i)
     }
     // dst获取需要根据指令类型判断，常规 、Even PP 、OddPP ，对应三组独立的索引更新规则
-    val normal = genIter(io.seRIter.fireStreamOp(2), io.seRIter.iterCnt(2))
     val ppEven    = genIter(io.seRIter.fireStreamOpPP(Even), io.seRIter.iterCntPP(Even))
     val ppOdd    = genIter(io.seRIter.fireStreamOpPP(Odd), io.seRIter.iterCntPP(Odd))
     for (i <- 0 until ndcd) {
+      val dstId = io.fte.instPkg(i).bits.sinfo.fifoId(2)
+      val normal = streamIter(dstId)(i)
+      val compute = Mux(dstId === ComputeX.U, computeWriteIter(0)(i), computeWriteIter(1)(i))
+      val normalOrCompute = Mux(dstId === ComputeX.U || dstId === ComputeY.U, compute, normal)
       seIter(2)(i) :=
         Mux(io.seRIter.fireStreamOpPP(Even)(i), ppEven(i),
           Mux(io.seRIter.fireStreamOpPP(Odd)(i), ppOdd(i),
-            normal(i)))
+            normalOrCompute))
     }
 
 

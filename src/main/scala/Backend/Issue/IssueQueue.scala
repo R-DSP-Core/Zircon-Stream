@@ -7,6 +7,7 @@ import ZirconConfig.Decode._
 import ZirconUtil._
 import Log2OH._
 import ZirconConfig.EXEOp._
+import ZirconConfig.Stream._
 
 class ReplayBusPkg extends Bundle {
     val prd     = UInt(wpreg.W)
@@ -130,7 +131,8 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
         io.se(i).isCalStream := false.B  
         io.se(i).useBuffer := VecInit.fill(3)(false.B)
         io.se(i).usePPBuffer := false.B
-        io.se(i).iterCnt := VecInit.fill(3)(0.U(32.W))    
+        io.se(i).iterCnt := VecInit.fill(3)(0.U(32.W))
+        io.se(i).fifoId := VecInit.fill(3)(0.U(streamBits.W))
     }
 
     val fList = Module(new ClusterIndexFIFO(
@@ -177,6 +179,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             io.se(flatIdx).useBuffer := e.item.sinfo.useBuffer
             io.se(flatIdx).usePPBuffer := e.item.sinfo.usePPBuffer.asUInt.orR
             io.se(flatIdx).iterCnt := e.item.iterCnt
+            io.se(flatIdx).fifoId := e.item.sinfo.fifoId
             e := e.stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem, VecInit(io.se.map(_.ready)), flatIdx.U)
         }
     } 
@@ -188,6 +191,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             io.se(flatIdx).useBuffer := io.enq(i).bits.sinfo.useBuffer
             io.se(flatIdx).usePPBuffer := io.enq(i).bits.sinfo.usePPBuffer.asUInt.orR
             io.se(flatIdx).iterCnt := io.enq(i).bits.iterCnt
+            io.se(flatIdx).fifoId := io.enq(i).bits.sinfo.fifoId
             iq(freeIQ(i))(freeItem(i)) := (new IQEntry(len))(
                 enqEntries(i), 
                 if(isMem) Mux(enqEntries(i).op(6), memLeftNext(i), stLeftNext(i)) 

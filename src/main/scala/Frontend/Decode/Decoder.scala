@@ -10,6 +10,7 @@ class StreamInfo extends Bundle{
     val state = Output(Vec(streamCfgBits,Bool()))
     val useBuffer = Output(Vec(3,Bool()))
     val usePPBuffer = Output(Vec(2,Bool()))
+    val fifoId = Output(Vec(3, UInt(streamBits.W)))
 }
 
 class DecoderIO extends Bundle{
@@ -43,6 +44,17 @@ class Decoder extends Module{
     val isMem        = isLoad || isStore
     val isMuldiv     = inst(6, 0) === 0x33.U && funct7(0) === 1.U
     val isStream     = inst(6, 0) === 0x0b.U
+
+    // These are the raw low bits of the architectural register fields. Their
+    // role is instruction-dependent: SSS uses all three as stream IDs, SSR
+    // uses rs1/rs2 as stream IDs and rd as a GPR destination, while CFG/RRS
+    // keeps its register fields as ordinary GPR operands. useBuffer selects
+    // only the fields that actually carry stream IDs.
+    val encodedFifoId = VecInit(
+        inst(15 + streamBits - 1, 15),
+        inst(20 + streamBits - 1, 20),
+        inst(7 + streamBits - 1, 7)
+    )
 
     /*  STREAM OP:
         4bit指示stream op
@@ -82,7 +94,11 @@ class Decoder extends Module{
     io.sinfo.useBuffer(2)   := isStream && io.sinfo.op === CALSTREAM // RD写通用寄存器，另外两条指令写PPbuffer
     io.sinfo.usePPBuffer(Even) := isStream && io.sinfo.op === CALSTREAMPP
     io.sinfo.usePPBuffer(Odd) := isStream && io.sinfo.op === CALRJRKSTREAMPP
-    val isStreamAlu = isCalStream && (!isCalStreamRD || (funct7 === 0.U || funct7 === 8.U )) //TODO 加法0 减法8
+    for (i <- 0 until 3) {
+        io.sinfo.fifoId(i) := Mux(io.sinfo.useBuffer(i), encodedFifoId(i), 0.U)
+    }
+    val isStreamMul = isCalStream && !isCalStreamRJRK && io.sinfo.op =/= CALSTREAMPP && funct7 === 16.U
+    val isStreamAlu = isCalStream && !isStreamMul
     val isStreamMdu = isStream && !isStreamAlu
 
     /* op: 
@@ -101,9 +117,10 @@ class Decoder extends Module{
         isJal         -> JAL(3, 0),
         isBr          -> 1.U(1.W) ## funct3,
         isMem         -> isAtom ## funct3,
-        isCalStreamRD -> funct7(3,0), // 目前有乘法、减法和加法
-        (isCalStreamNRD && isCalStreamRJRK) -> 6.U, // 目前是or
-        (isCalStreamNRD && !isCalStreamRJRK)   -> 0.U //TODO 目前是加法
+        isCalStreamRD -> funct7(3,0), // SSR add/sub/mul
+        (isCalStreamNRD && isCalStreamRJRK) -> 6.U, // RRS currently uses or
+        (isCalStreamNRD && io.sinfo.op === CALSTREAMPP) -> 0.U, // SSP funct7 selects PP, not ALU op
+        (isCalStreamNRD && io.sinfo.op === CALSTREAM) -> funct7(3,0) // SSS add/sub/mul
     ))
     io.op := op_6 ## op_5 ## op_4 ## op_3_0
 

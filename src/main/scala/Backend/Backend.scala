@@ -3,6 +3,7 @@ import chisel3.util._
 import ZirconConfig.Issue._
 import ZirconConfig.Decode._
 import ZirconConfig.Commit._
+import ZirconConfig.Stream._
 
 // class BackendFrontendIO extends Bundle {
 //     val rf = new RegfilePredictIO
@@ -31,7 +32,11 @@ class BackendBDBIO extends Bundle {
 
 class CommitStreamIO extends Bundle{
     val flush       = Input(Bool())
-    val fireStreamOp = Input(Vec(3,Vec(ncommit,Bool()))) // use 0 | use 1 | use 2
+    val fireStreamOp = Input(Vec(streamNum,Vec(ncommit,Bool())))
+    val fireStreamRead = Input(Vec(streamNum,Vec(ncommit,Bool())))
+    val streamReadIterCnt = Input(Vec(streamNum, Vec(ncommit, UInt(32.W))))
+    val fireComputeWrite = Input(Vec(computeStreamNum, Vec(ncommit, Bool())))
+    val computeWriteIterCnt = Input(Vec(computeStreamNum, Vec(ncommit, UInt(32.W))))
     val fireStreamOpPP = Input(Vec(2,Vec(ncommit,Bool())))
     val iterCnt = Input(Vec(3,Vec(ncommit,UInt(32.W))))
 }
@@ -221,4 +226,4 @@ class Backend extends Module {
     for (k <- 0 until lsuNiq){
         lsIQ.io.se(k).ready := true.B
     }
-}   
+}

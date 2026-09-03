@@ -76,6 +76,7 @@ class MulDivPipeline extends Module {
     io.rf.rd.prj    := instPkgRF.prj
     io.rf.rd.prk    := instPkgRF.prk
     io.serf.iterCnt  := instPkgRF.iterCnt
+    io.serf.fifoId   := instPkgRF.sinfo.fifoId
     instPkgRF.src1  := Mux(instPkgRF.needStreamSrc, io.serf.rdata1 ,io.rf.rd.prjData)
     instPkgRF.src2  := Mux(instPkgRF.needStreamSrc, io.serf.rdata2 ,io.rf.rd.prkData)
     instPkgRF.cycles.exe := cycleReg  // for profiling
@@ -162,6 +163,7 @@ class MulDivPipeline extends Module {
     io.sewb.wvalid  := instPkgWB.isCalStream
     io.sewb.useBuffer := instPkgWB.sinfo.useBuffer
     io.sewb.iterCnt := instPkgWB.iterCnt
+    io.sewb.fifoId := instPkgWB.sinfo.fifoId
     io.sewb.wdata   :=  instPkgWB.rfWdata
     io.sewb.usePPBuffer := instPkgWB.sinfo.usePPBuffer.asUInt.orR
 }

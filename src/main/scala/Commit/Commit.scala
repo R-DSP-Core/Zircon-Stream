@@ -7,6 +7,7 @@ import ZirconConfig.Issue._
 import ZirconUtil._
 import ZirconConfig.Stream._
 import ZirconConfig.EXEOp._
+import ZirconConfig.FifoRole._
 
 class CommitDBGIO extends Bundle {
     val rob = new ROBDebugIO
@@ -135,10 +136,24 @@ class Commit extends Module {
         val instBits = rob.io.cmt.deq(i).bits
         val useBuffer = instBits.sinfo.useBuffer
         val usePPBuffer = instBits.sinfo.usePPBuffer
+        val fifoId = instBits.sinfo.fifoId
         val sop = instBits.sinfo.op
         val fireStream = (sop === CALSTREAMRD || sop === CALRJRKSTREAMPP || sop === CALSTREAM || sop === CALSTREAMPP) && rob.io.cmt.deq(i).valid
+        val computeDst = fifoId(2) === ComputeX.U || fifoId(2) === ComputeY.U
+        for (b <- 0 until streamNum) {
+          val read = useBuffer(0) && fifoId(0) === b.U ||
+                     useBuffer(1) && fifoId(1) === b.U
+          val normalWrite = useBuffer(2) && !computeDst && fifoId(2) === b.U
+          io.bke.stream.fireStreamOp(b)(i) := fireStream && (read || normalWrite)
+          io.bke.stream.fireStreamRead(b)(i) := fireStream && read
+          io.bke.stream.streamReadIterCnt(b)(i) := Mux(useBuffer(0) && fifoId(0) === b.U,
+                                                       instBits.itercnt(0), instBits.itercnt(1))
+        }
+        for (b <- 0 until computeStreamNum) {
+          io.bke.stream.fireComputeWrite(b)(i) := fireStream && useBuffer(2) && fifoId(2) === (ComputeX + b).U
+          io.bke.stream.computeWriteIterCnt(b)(i) := instBits.itercnt(2)
+        }
         for (b <- 0 until 3) {
-          io.bke.stream.fireStreamOp(b)(i) := fireStream && useBuffer(b)
           io.bke.stream.iterCnt(b)(i) := instBits.itercnt(b)
         }
         for (k <- 0 until 2) {

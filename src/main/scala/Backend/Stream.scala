@@ -10,6 +10,7 @@ import ZirconConfig.Commit._
 
 class SERFIO extends Bundle {
     val iterCnt = Input(Vec(3,UInt(32.W)))
+    val fifoId = Input(Vec(3, UInt(streamBits.W)))
     val rdata1 = Output(UInt(32.W))
     val rdata2 = Output(UInt(32.W))
 }
@@ -19,6 +20,7 @@ class SEWBIO extends Bundle {
     val useBuffer = Input(Vec(3,Bool()))
     val usePPBuffer = Input(Bool())
     val iterCnt = Input(Vec(3,UInt(32.W)))
+    val fifoId = Input(Vec(3, UInt(streamBits.W)))
     val wdata  = Input(UInt(32.W))
 }
 
@@ -27,6 +29,7 @@ class SEISSIO extends Bundle {
     val usePPBuffer = Input(Bool())
     val useBuffer = Input(Vec(3,Bool()))
     val iterCnt = Input(Vec(3,UInt(32.W)))
+    val fifoId = Input(Vec(3, UInt(streamBits.W)))
     val ready  = Output(Bool())
 }
 
@@ -168,6 +171,8 @@ class StreamEngine extends Module {
 
     val archI  = RegInit(VecInit.fill(streamNum)(0.U.asTypeOf(new dynIState)))
     val specI  = RegInit(VecInit.fill(streamNum)(0.U.asTypeOf(new dynIState)))
+    val archComputeWriteI = RegInit(VecInit.fill(computeStreamNum)(0.U.asTypeOf(new dynIState)))
+    val specComputeWriteI = RegInit(VecInit.fill(computeStreamNum)(0.U.asTypeOf(new dynIState)))
     val iLimitCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_limit
     val iRepeatCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_repeat
     val iOffsetCfg = RegInit(VecInit.fill(streamNum)(0.U(32.W)))  //fifo_id -> i_offset
@@ -189,8 +194,8 @@ class StreamEngine extends Module {
     val reuseCfg = RegInit(VecInit.fill(streamNum)(0.U(counterWidth.W)))
     val stateCfg = RegInit(VecInit.fill(streamNum)(VecInit.fill(streamCfgBits)(false.B))) //fifo_id -> [doneCfg,isLoad,...]
 
-    val loadreadyMap = RegInit(VecInit.fill(streamNum-1)(VecInit.fill(fifoWord)(0.U(counterWidth.W))))
-    val archLoadReadyMap = RegInit(VecInit.fill(streamNum-1)(VecInit.fill(fifoWord)(0.U(counterWidth.W))))
+    val loadreadyMap = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(0.U(counterWidth.W))))
+    val archLoadReadyMap = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(0.U(counterWidth.W))))
 
     val storereadyMap = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(false.B)))
     val Fifo = RegInit(VecInit.fill(streamNum)(VecInit.fill(fifoWord)(0.U(32.W))))  //fifo_id,itercnt -> data
@@ -258,6 +263,8 @@ class StreamEngine extends Module {
     val cfgDimStride = src1
     val fifoId = VecInit(src1(streamBits*2-1, streamBits),src1(streamBits-1, 0),src2(streamBits-1, 0))//fifo_src_0 fifo_src_1 fifo_dst
     val dimId = src2(streamBits + 1, streamBits)
+    val isComputeFifo = fifoId(Dst) === ComputeX.U || fifoId(Dst) === ComputeY.U
+    val computeFifoIdx = (fifoId(Dst) - ComputeX.U)(log2Ceil(computeStreamNum)-1, 0)
     val isLayoutLoad = op === CFGLOAD && valid && fifoId(Dst) === Layout.U
     val isLayoutStore = op === CFGSTORE && valid && fifoId(Dst) === Layout.U
 
@@ -266,6 +273,10 @@ class StreamEngine extends Module {
     when(isCfgI){
         specI(fifoId(Dst)).iCnt := 0.U
         archI(fifoId(Dst)).iCnt := 0.U
+        when(isComputeFifo) {
+            specComputeWriteI(computeFifoIdx).iCnt := 0.U
+            archComputeWriteI(computeFifoIdx).iCnt := 0.U
+        }
         streamMap(fifoId(Dst)) := 0.U
         lengthMap(fifoId(Dst)) := cfgLength / l2LineWord.U
         outerIterMap(fifoId(Dst)) := outerIter
@@ -276,11 +287,19 @@ class StreamEngine extends Module {
         iLimitCfg(fifoId(Dst)) := cfgIlimit
         specI(fifoId(Dst)).iLimit := cfgIlimit
         archI(fifoId(Dst)).iLimit := cfgIlimit
+        when(isComputeFifo) {
+            specComputeWriteI(computeFifoIdx).iLimit := cfgIlimit
+            archComputeWriteI(computeFifoIdx).iLimit := cfgIlimit
+        }
     }
     when(isCfgIRepeat){
         iRepeatCfg(fifoId(Dst)) := cfgIrepeat
         specI(fifoId(Dst)).iRepeat := 0.U
         archI(fifoId(Dst)).iRepeat := 0.U
+        when(isComputeFifo) {
+            specComputeWriteI(computeFifoIdx).iRepeat := 0.U
+            archComputeWriteI(computeFifoIdx).iRepeat := 0.U
+        }
     }
     when(isCfgIOffset){
         iOffsetCfg(fifoId(Dst)) := cfgIoffset
@@ -467,8 +486,7 @@ class StreamEngine extends Module {
     (nextState, iterCnt)
     }
 
-    // 对 0 1 2号流的状态分别进行更新
-    for (b <- 0 until 3) {
+    for (b <- 0 until streamNum) {
       // DISPATCH
       val (nextState, iterCnt) = updateIState(
         state        = specI(b),
@@ -509,14 +527,58 @@ class StreamEngine extends Module {
       when(!isCfgI && !isCfgILimit && !isCfgIRepeat && !isCfgIOffset ){ // 配置指令不更新状态，其他指令才更新
         archI(b) := nextArchState
       }
-      if( b != 2 ){ //TODO: 当前仅对src0 src1恢复
-        for (i <- 0 until ncommit) {
-        when(io.cmt.fireStreamOp(b)(i)){
-          //assert(iterCntArch(i) === io.cmt.iterCnt(b)(i), p"isLLL:${io.cmt.fireStreamOpPP(Even)(i)},slot${i}, op${b}; arch iterCnt ${iterCntArch(i)} != cmt iterCnt ${io.cmt.iterCnt(b)(i)}")
-          val idx = (io.cmt.iterCnt(b)(i) % fifoWord.U)(log2Ceil(fifoWord)-1,0)
-          archLoadReadyMap(b)(idx) := archLoadReadyMap(b)(idx) - 1.U
-        }
+    }
+
+    for (b <- 0 until computeStreamNum) {
+      val fifo = ComputeX + b
+      val (nextState, iterCnt) = updateIState(
+        state        = specComputeWriteI(b),
+        fireVec      = io.rdIter.fireComputeWrite(b),
+        iLimitCfg    = iLimitCfg(fifo),
+        iRepeatCfg   = iRepeatCfg(fifo),
+        iOffsetCfg   = iOffsetCfg(fifo)
+      )
+      when(!isCfgI && !isCfgILimit && !isCfgIRepeat && !isCfgIOffset) {
+        specComputeWriteI(b) := nextState
       }
+      io.rdIter.computeWriteIterCnt(b) := iterCnt
+
+      val (nextArchState, iterCntArch) = updateIState(
+        state        = archComputeWriteI(b),
+        fireVec      = io.cmt.fireComputeWrite(b),
+        iLimitCfg    = iLimitCfg(fifo),
+        iRepeatCfg   = iRepeatCfg(fifo),
+        iOffsetCfg   = iOffsetCfg(fifo)
+      )
+      when(!isCfgI && !isCfgILimit && !isCfgIRepeat && !isCfgIOffset) {
+        archComputeWriteI(b) := nextArchState
+      }
+    }
+
+    // Fold committed intermediate writes and stream reads in ROB order. A
+    // producer and its consumer may retire together, so independent register
+    // assignments would otherwise lose one of the ready-count updates.
+    for (b <- 0 until streamNum) {
+      for (word <- 0 until fifoWord) {
+        var nextReady = archLoadReadyMap(b)(word)
+        var touched = false.B
+        for (i <- 0 until ncommit) {
+          val readIdx = (io.cmt.streamReadIterCnt(b)(i) % fifoWord.U)(log2Ceil(fifoWord)-1, 0)
+          val readHit = io.cmt.fireStreamRead(b)(i) && readIdx === word.U
+          val writeHit = if (b >= ComputeX && b <= ComputeY) {
+            val computeIdx = b - ComputeX
+            val writeIdx = (io.cmt.computeWriteIterCnt(computeIdx)(i) % fifoWord.U)(log2Ceil(fifoWord)-1, 0)
+            io.cmt.fireComputeWrite(computeIdx)(i) && writeIdx === word.U
+          } else {
+            false.B
+          }
+          nextReady = Mux(writeHit, reuseCfg(b), nextReady)
+          nextReady = Mux(readHit, nextReady - 1.U, nextReady)
+          touched = touched || writeHit || readHit
+        }
+        when(touched) {
+          archLoadReadyMap(b)(word) := nextReady
+        }
       }
     }
 
@@ -635,7 +697,7 @@ class StreamEngine extends Module {
     }
 
     def getPP( ppRaw: UInt , revSeg: UInt): (UInt,UInt) = {
-        ( 0.U ## ppRaw(5), Mux(revSeg === 0.U, Cat(~ppRaw(6), ppRaw(4,0)), Cat(ppRaw(6), ppRaw(4,0))) )
+        ( Cat(0.U((streamBits - 1).W), ppRaw(5)), Mux(revSeg === 0.U, Cat(~ppRaw(6), ppRaw(4,0)), Cat(ppRaw(6), ppRaw(4,0))) )
     }
 
     // b = 0，流流流；b = 1，寄寄流
@@ -704,6 +766,7 @@ class StreamEngine extends Module {
     // Flush
     when(io.cmt.flush){
       specI := archI
+      specComputeWriteI := archComputeWriteI
       specPP := archPP
       loadreadyMap := archLoadReadyMap
       printf(p"\n\n---------------------- FLUSH --------------------------\n")
@@ -718,12 +781,18 @@ class StreamEngine extends Module {
         for (b <- 0 until 3) {
             issWordIdx(b) := (io.iss(i).iterCnt(b) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
         }
+        val src0Id = io.iss(i).fifoId(0)
+        val src1Id = io.iss(i).fifoId(1)
+        val dstId = io.iss(i).fifoId(2)
         val (ppId, ppIdx) = getPP(io.iss(i).iterCnt(2), ppDecBase)
         val ppRdy = !io.iss(i).usePPBuffer || loadreadyMap(ppId)(ppIdx) === 0.U
+        val dstRdy = Mux(dstId === Dst.U,
+                         !storereadyMap(Dst)(issWordIdx(2)),
+                         loadreadyMap(dstId)(issWordIdx(2)) === 0.U)
         io.iss(i).ready :=  io.iss(i).isCalStream &
-                          (loadreadyMap(0)(issWordIdx(0)) =/= 0.U || !io.iss(i).useBuffer(0)) &
-                          (loadreadyMap(1)(issWordIdx(1)) =/= 0.U || !io.iss(i).useBuffer(1)) &
-                          (!storereadyMap(Dst)(issWordIdx(2)) || !io.iss(i).useBuffer(2)) & ppRdy
+                          (loadreadyMap(src0Id)(issWordIdx(0)) =/= 0.U || !io.iss(i).useBuffer(0)) &
+                          (loadreadyMap(src1Id)(issWordIdx(1)) =/= 0.U || !io.iss(i).useBuffer(1)) &
+                          (dstRdy || !io.iss(i).useBuffer(2)) & ppRdy
     }
 
     // ReadOp stage + writeback stage
@@ -731,20 +800,32 @@ class StreamEngine extends Module {
         // readop stage
         val rfWordIdx0 = (io.rf(i).iterCnt(0) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
         val rfWordIdx1 = (io.rf(i).iterCnt(1) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
-        io.rf(i).rdata1 := Fifo(0)(rfWordIdx0)
-        io.rf(i).rdata2 := Fifo(1)(rfWordIdx1)
+        io.rf(i).rdata1 := Fifo(io.rf(i).fifoId(0))(rfWordIdx0)
+        io.rf(i).rdata2 := Fifo(io.rf(i).fifoId(1))(rfWordIdx1)
         // writeback stage
-        when(io.wb(i).wvalid){
-            for (b <- 0 until 2){
-                when(io.wb(i).useBuffer(b)){
-                    val wbSrcIdx = (io.wb(i).iterCnt(b) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
-                    loadreadyMap(b)(wbSrcIdx) := loadreadyMap(b)(wbSrcIdx) - 1.U
-                }
+        // A flushed instruction must not consume or produce stream data after
+        // the speculative maps have been restored from committed state.
+        when(io.wb(i).wvalid && !io.cmt.flush){
+            val src0Id = io.wb(i).fifoId(0)
+            val src1Id = io.wb(i).fifoId(1)
+            val wbSrcIdx0 = (io.wb(i).iterCnt(0) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
+            val wbSrcIdx1 = (io.wb(i).iterCnt(1) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
+            when(io.wb(i).useBuffer(0)) {
+                loadreadyMap(src0Id)(wbSrcIdx0) := loadreadyMap(src0Id)(wbSrcIdx0) - 1.U
+            }
+            when(io.wb(i).useBuffer(1) && (!io.wb(i).useBuffer(0) || src1Id =/= src0Id)) {
+                loadreadyMap(src1Id)(wbSrcIdx1) := loadreadyMap(src1Id)(wbSrcIdx1) - 1.U
             }
             when(io.wb(i).useBuffer(2)){
+                val dstId = io.wb(i).fifoId(2)
                 val wbWordIdx = (io.wb(i).iterCnt(2) % fifoWord.U) (log2Ceil(fifoWord)-1,0)
-                Fifo(2)(wbWordIdx) := io.wb(i).wdata
-                storereadyMap(Dst)(wbWordIdx) := true.B
+                Fifo(dstId)(wbWordIdx) := io.wb(i).wdata
+                when(dstId === Dst.U) {
+                    storereadyMap(Dst)(wbWordIdx) := true.B
+                }.otherwise {
+                    assert(loadreadyMap(dstId)(wbWordIdx) === 0.U)
+                    loadreadyMap(dstId)(wbWordIdx) := reuseCfg(dstId)
+                }
             }
             when(io.wb(i).usePPBuffer){
                 val (ppId, ppIdx) = getPP(io.wb(i).iterCnt(2), ppDecBase)
