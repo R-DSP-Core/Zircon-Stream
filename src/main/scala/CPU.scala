@@ -18,6 +18,7 @@ class CPUDebugIO extends Bundle {
 
 class CPUIO(sim: Boolean) extends Bundle {
     val axi = new AXIIO
+    val execCommit = Output(Bool())
     val dbg = if(sim) Some(new CPUDebugIO) else None
 }
 
@@ -47,6 +48,7 @@ class CPU(sim: Boolean = false) extends Module {
     arb.io.stream <> bke.io.mem.stream
     arb.io.tcm <> bke.io.tcm
     arb.io.axi <> io.axi
+    io.execCommit := cmt.io.execCommit
 
 
     cmt.io.dbg.robDeq.flush := false.B

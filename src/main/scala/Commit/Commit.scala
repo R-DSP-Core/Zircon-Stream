@@ -26,6 +26,7 @@ class CommitIO extends Bundle {
     val bke = Flipped(new BackendCommitIO)
     val dsp = new CommitDispatchIO
     val dbg = new CommitDBGIO
+    val execCommit = Output(Bool())
 }
 
 class Commit extends Module {
@@ -76,6 +77,30 @@ class Commit extends Module {
     // store buffer
     io.bke.sb.stCmt := ShiftRegister(lastROBItem.isStore, 1, false.B, true.B)
     io.bke.sb.flush := ShiftRegister(flush, 1, false.B, true.B)
+
+    // A retired store to the platform completion register is the software
+    // completion command.  Do not expose it to the SU until the store buffer
+    // has first observed outstanding work and then become completely empty;
+    // this orders the command after every older program store.
+    val doneStoreRetired = VecInit(rob.io.cmt.deq.map { deq =>
+        deq.valid && deq.bits.isStore &&
+            deq.bits.storeAddr === "hfffffff0".U && deq.bits.sWdata === 1.U
+    }).asUInt.orR
+    val execCommitPending = RegInit(false.B)
+    val execCommitSawBusy = RegInit(false.B)
+    val execCommitPulse = execCommitPending && execCommitSawBusy &&
+        io.bke.storeBufferClear
+
+    when(doneStoreRetired) {
+        execCommitPending := true.B
+        execCommitSawBusy := !io.bke.storeBufferClear
+    }.elsewhen(execCommitPulse) {
+        execCommitPending := false.B
+        execCommitSawBusy := false.B
+    }.elsewhen(execCommitPending && !io.bke.storeBufferClear) {
+        execCommitSawBusy := true.B
+    }
+    io.execCommit := execCommitPulse
 
     // rename
     io.fte.rnm.fList.enq.zipWithIndex.foreach{ case (enq, i) =>

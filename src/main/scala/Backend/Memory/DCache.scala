@@ -129,6 +129,7 @@ class DCacheIO extends Bundle {
     val l2  = Flipped(new L2DCacheIO)
     val dbg = Output(MixedVec(new DCacheReadDBG, new DCacheWriteDBG))
     val profiling = Output(new DCacheProfilingDBG)
+    val storeBufferClear = Output(Bool())
 }
 
 class DCache extends Module {
@@ -155,6 +156,7 @@ class DCache extends Module {
     // Control modules
     val fsm      = Module(new DCacheFSM)
     val sb       = Module(new StoreBuffer)
+    io.storeBufferClear := sb.io.clear
     val missC1   = RegInit(false.B)
     val hitC1    = RegInit(0.U(l1Way.W))
     val rbuf     = RegInit(VecInit.fill(l1Line)(0.U(8.W)))
@@ -333,4 +335,3 @@ class DCache extends Module {
     io.profiling    := fsm.io.profiling
     io.profiling.addr := io.l2.paddr
 }
-

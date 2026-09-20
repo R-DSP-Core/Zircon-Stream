@@ -43,6 +43,7 @@ class BackendCommitIO extends Bundle {
     val bdb = new BackendBDBIO
     val sb    = new DCommitIO
     val flush = Input(Vec(nis, Bool()))
+    val storeBufferClear = Output(Bool())
 }
 
 class BackendMemoryIO extends Bundle {
@@ -84,6 +85,7 @@ class Backend extends Module {
     val arPP = VecInit.fill(3)(Module(new ArithPipeline).io)
     val mdPP = Module(new MulDivPipeline)
     val lsPP = Module(new LSPipeline)
+    io.cmt.storeBufferClear := lsPP.io.storeBufferClear
     io.dcProfiling := lsPP.io.dcProfiling
     val wakeBus = Wire(Vec(niq, Vec(nis, new WakeupBusPkg)))
     val rplyBus = Wire(new ReplayBusPkg)

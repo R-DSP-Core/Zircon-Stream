@@ -51,6 +51,7 @@ class LSPipelineIO extends Bundle {
     val dcProfiling = Output(new DCacheProfilingDBG)
     val se  = new LSSEIO
     val tcm = new TbMemIO
+    val storeBufferClear = Output(Bool())
 }
 
 class LSPipeline extends Module {
@@ -58,6 +59,7 @@ class LSPipeline extends Module {
     
     val agu = Module(new BLevelPAdder32)
     val dc  = Module(new DCache)
+    io.storeBufferClear := dc.io.storeBufferClear
 
     //TCM
     val dtcm = Module(new DTCMBurst)
@@ -156,7 +158,16 @@ class LSPipeline extends Module {
     dc.io.cmt.flush     := io.cmt.dc.flush
     dc.io.mmu.paddr     := Mux(io.se.dc.rreqD1, io.se.dc.paddrD1, instPkgD1.src1)
     // TODO: add mmu
-    dc.io.mmu.uncache   := Mux(io.se.dc.rreqD1, 0.U, instPkgD1.src1(31, 28) === 0xa.U)
+    // 0xA... is the LocalMemory uncached alias. 0xF... is the platform
+    // MMIO/doorbell region (the PE completion register is 0xfffffff0), so a
+    // store there must reach the external AXI bus instead of remaining dirty
+    // in DCache/L2 indefinitely.
+    val storeRegion = instPkgD1.src1(31, 28)
+    dc.io.mmu.uncache := Mux(
+        io.se.dc.rreqD1,
+        false.B,
+        storeRegion === 0xa.U || storeRegion === 0xf.U
+    )
     dc.io.mmu.exception := 0.U(8.W)
     dc.io.l2            <> io.mem.l2
     instPkgD1.cycles.exe1 := cycleReg  // for profiling
