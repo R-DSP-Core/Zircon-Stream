@@ -158,6 +158,7 @@ class StreamOuterTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "accumulate consecutive MACs and recover the committed prefix after a flush" in {
     test(new StreamOuterRegisters) { c =>
+      c.io.operands.foreach(_.foreach(_.poke(0.U)))
       def event(e: StreamOuterEvent, valid: Boolean, op: UInt, bank: Int, value: Long): Unit = {
         e.valid.poke(valid.B); e.info.op.poke(op); e.info.bank.poke(bank.U)
         e.info.state.foreach(_.poke(false.B)); e.info.useBuffer.foreach(_.poke(false.B))

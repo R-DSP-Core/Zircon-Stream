@@ -93,7 +93,7 @@ class SEL2IO extends Bundle {
 }
 
 class StreamEngineIO extends Bundle {
-    val outerRF = new SEOuterRFIO
+    val outerRF = Vec(2, new SEOuterRFIO)
     val outerReserve = Input(new StreamOuterEvent)
     val storesDrained = Output(Bool())
     val rf = Vec(4, new SERFIO) // 4 is muldiv
@@ -824,9 +824,10 @@ class StreamEngine extends Module {
         }
     }
 
-    for (lane <- 0 until 8) {
-      val idx = (io.outerRF.index + lane.U)(log2Ceil(fifoWord)-1, 0)
-      io.outerRF.data(lane) := Fifo(io.outerRF.fifo)(idx)
+    for (operand <- 0 until 2; lane <- 0 until 8) {
+      val port = io.outerRF(operand)
+      val idx = (port.index + lane.U)(log2Ceil(fifoWord)-1, 0)
+      port.data(lane) := Fifo(port.fifo)(idx)
     }
 
     // Reserve source credits at vector issue, before another instruction can
@@ -841,14 +842,14 @@ class StreamEngine extends Module {
       }
       val reserve = io.outerReserve
       val start = Mux(reserve.info.fifoId(0) === b.U, reserve.index(0), reserve.index(1))
-      val vectorRead = reserve.valid && reserve.info.op === VOMAC8 &&
+      val vectorRead = reserve.valid && StreamOuter.readsStream(reserve.info.op) &&
         (word.U - start)(log2Ceil(fifoWord)-1, 0) < StreamOuter.readWords(reserve.info, b.U)
       val count = PopCount(scalarReads) +& vectorRead
       when(count =/= 0.U && !io.cmt.flush) {
         assert(loadreadyMap(b)(word) >= count, "stream source credit underflow")
         loadreadyMap(b)(word) := loadreadyMap(b)(word) - count
       }
-      when(reserve.valid && reserve.info.op === VREGOUT8 && reserve.info.fifoId(2) === b.U &&
+      when(reserve.valid && StreamOuter.writesStream(reserve.info.op) && reserve.info.fifoId(2) === b.U &&
         (word.U - reserve.index(2))(log2Ceil(fifoWord)-1, 0) < 8.U) {
         pendingOuterWrites(b)(word) := true.B
       }
@@ -857,7 +858,7 @@ class StreamEngine extends Module {
 
     // Only retired exports become visible to memory or to X/Y consumers.
     for (event <- io.cmt.outer) {
-      when(event.valid && event.info.op === VREGOUT8) {
+      when(event.valid && StreamOuter.writesStream(event.info.op)) {
         val dst = event.info.fifoId(2)
         for (lane <- 0 until 8) {
           val idx = (event.index(2) + lane.U)(log2Ceil(fifoWord)-1, 0)

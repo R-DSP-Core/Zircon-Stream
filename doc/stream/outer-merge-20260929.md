@@ -4,7 +4,7 @@
 
 以服务器 `luoteng:~/Zircon-2024-main` 的六路 stream、四维地址配置、FIFO3 转置、X/Y 计算流为基线。
 参考 SIMD 分支的“广播一个标量、乘一个 8-word 窗口、累加到 VReg”结构，没有整套覆盖对方的 Stream/Dispatch/Commit。
-此次只实现外积三条指令，不实现 VDOT，也不表示 SIMD 草案中的所有向量指令已落地。
+本文记录外积三条指令的首阶段实现。后续逐元素 SIMD 和 VDOT 的实现见 [SIMD8 补充说明](simd8-implementation-20260929.md)，首阶段本身不包含这些指令。
 
 修改前已保存三个仓库，均未 push：
 

@@ -11,6 +11,9 @@ if [[ ${SKIP_BUILD:-0} != 1 ]]; then
 fi
 
 cases=(
+    stream-test/stream-simd-vector
+    stream-test/stream-simd-edges
+    stream-matrix/stream-simd-matrix
     stream-matrix/stream-outer-edges
     stream-matrix/stream-outer-matrix
     stream-test/stream-add

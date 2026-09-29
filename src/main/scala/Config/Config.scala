@@ -71,6 +71,10 @@ object EXEOp {
     val VOMAC8 = 0x10.U(stInstBits.W)
     val VCLR = 0x11.U(stInstBits.W)
     val VREGOUT8 = 0x12.U(stInstBits.W)
+    val VADD8 = 0x13.U(stInstBits.W)
+    val VSUB8 = 0x14.U(stInstBits.W)
+    val VMUL8 = 0x15.U(stInstBits.W)
+    val VDOT8 = 0x16.U(stInstBits.W)
     val streamCfgBits = 3
     val CFGSTORE = 0x1.U(stInstBits.W)
     val CFGLOAD = 0x5.U(stInstBits.W)

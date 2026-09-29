@@ -6,6 +6,10 @@ import ZirconConfig.Commit._
 
 object StreamOuter {
   def isOp(op: UInt): Bool = op === VOMAC8 || op === VCLR || op === VREGOUT8
+  def isElementwise(op: UInt): Bool = op === VADD8 || op === VSUB8 || op === VMUL8
+  def isVector(op: UInt): Bool = isOp(op) || isElementwise(op) || op === VDOT8
+  def readsStream(op: UInt): Bool = op === VOMAC8 || isElementwise(op) || op === VDOT8
+  def writesStream(op: UInt): Bool = op === VREGOUT8 || isElementwise(op)
 
   // One instruction consumes the union of its source windows, not their sum.
   def readWords(info: StreamInfo, fifo: UInt): UInt = {
@@ -57,9 +61,11 @@ class StreamOuterEvent extends Bundle {
 class StreamOuterRegisters extends Module {
   val io = IO(new Bundle {
     val execute = Input(new StreamOuterEvent)
+    val operands = Input(Vec(2, Vec(8, UInt(32.W))))
     val commit = Input(Vec(ncommit, new StreamOuterEvent))
     val flush = Input(Bool())
     val result = Output(Vec(8, UInt(32.W)))
+    val dot = Output(UInt(32.W))
   })
   val spec = RegInit(VecInit.fill(8)(VecInit.fill(8)(0.U(32.W))))
   val arch = RegInit(VecInit.fill(8)(VecInit.fill(8)(0.U(32.W))))
@@ -74,10 +80,24 @@ class StreamOuterRegisters extends Module {
     nextArch(bank)(lane) := value
   }
   arch := nextArch
+  // The same eight adders handle lane ADD/SUB, accumulator MAC, or the
+  // seven nodes of a balanced DOT tree. DOT does not touch accumulator state.
+  val sums = Wire(Vec(8, UInt(32.W)))
+  val op = io.execute.info.op
   for (lane <- 0 until 8) {
-    io.result(lane) := Mux(io.execute.info.op === VOMAC8,
-      spec(io.execute.info.bank)(lane) + io.execute.data(lane), spec(io.execute.info.bank)(lane))
+    val treeA = if (lane < 4) io.execute.data(2 * lane)
+      else if (lane < 6) sums(2 * (lane - 4)) else if (lane == 6) sums(4) else 0.U(32.W)
+    val treeB = if (lane < 4) io.execute.data(2 * lane + 1)
+      else if (lane < 6) sums(2 * (lane - 4) + 1) else if (lane == 6) sums(5) else 0.U(32.W)
+    val lhs = Mux(op === VDOT8, treeA,
+      Mux(op === VOMAC8, spec(io.execute.info.bank)(lane), io.operands(0)(lane)))
+    val rhs = Mux(op === VDOT8, treeB,
+      Mux(op === VOMAC8, io.execute.data(lane), io.operands(1)(lane)))
+    sums(lane) := BLevelPAdder32(lhs, Mux(op === VSUB8, ~rhs, rhs), (op === VSUB8).asUInt).io.res
+    io.result(lane) := Mux(op === VOMAC8 || op === VADD8 || op === VSUB8, sums(lane),
+      Mux(op === VMUL8 || op === VDOT8, io.execute.data(lane), spec(io.execute.info.bank)(lane)))
   }
+  io.dot := sums(6)
   when(io.execute.valid) {
     when(io.execute.info.op === VCLR) {
       spec := VecInit.fill(8)(VecInit.fill(8)(0.U(32.W)))

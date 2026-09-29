@@ -143,8 +143,8 @@ class Commit extends Module {
         val usePPBuffer = instBits.sinfo.usePPBuffer
         val fifoId = instBits.sinfo.fifoId
         val sop = instBits.sinfo.op
-        val fireStream = (sop === CALSTREAMRD || sop === CALRJRKSTREAMPP || sop === CALSTREAM || sop === CALSTREAMPP || StreamOuter.isOp(sop)) && instBits.sinfo.state(DONECFG) && rob.io.cmt.deq(i).valid
-        io.bke.stream.outer(i).valid := rob.io.cmt.deq(i).valid && instBits.sinfo.state(DONECFG) && StreamOuter.isOp(sop)
+        val fireStream = (sop === CALSTREAMRD || sop === CALRJRKSTREAMPP || sop === CALSTREAM || sop === CALSTREAMPP || StreamOuter.isVector(sop)) && instBits.sinfo.state(DONECFG) && rob.io.cmt.deq(i).valid
+        io.bke.stream.outer(i).valid := rob.io.cmt.deq(i).valid && instBits.sinfo.state(DONECFG) && StreamOuter.isVector(sop)
         io.bke.stream.outer(i).info := instBits.sinfo
         io.bke.stream.outer(i).index := instBits.itercnt
         io.bke.stream.outer(i).data := instBits.outerData

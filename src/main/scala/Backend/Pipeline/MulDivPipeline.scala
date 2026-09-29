@@ -41,7 +41,7 @@ class MulDivPipelineIO extends Bundle {
     val streamPP  = Flipped(new SEPipelineIO)
     val serf = Flipped(new SERFIO)
     val sewb = Flipped(new SEWBIO)
-    val outerRF = Flipped(new SEOuterRFIO)
+    val outerRF = Vec(2, Flipped(new SEOuterRFIO))
     val outerReserve = Output(new StreamOuterEvent)
     val outerCommit = Input(Vec(ncommit, new StreamOuterEvent))
 }
@@ -67,7 +67,7 @@ class MulDivPipeline extends Module {
     val instPkgIs = WireDefault(io.iq.instPkg.bits)
     io.iq.instPkg.ready := !(div.io.busy || streamBusy)
     io.outerReserve := 0.U.asTypeOf(new StreamOuterEvent)
-    io.outerReserve.valid := io.iq.instPkg.fire && instPkgIs.isCalStream && StreamOuter.isOp(instPkgIs.sinfo.op) && !io.cmt.flush
+    io.outerReserve.valid := io.iq.instPkg.fire && instPkgIs.isCalStream && StreamOuter.isVector(instPkgIs.sinfo.op) && !io.cmt.flush
     io.outerReserve.info := instPkgIs.sinfo
     io.outerReserve.index := instPkgIs.iterCnt
 
@@ -91,9 +91,13 @@ class MulDivPipeline extends Module {
     io.rf.rd.prk    := instPkgRF.prk
     io.serf.iterCnt  := instPkgRF.iterCnt
     io.serf.fifoId   := instPkgRF.sinfo.fifoId
-    io.outerRF.fifo := instPkgRF.sinfo.fifoId(1)
-    io.outerRF.index := instPkgRF.iterCnt(1)
-    val vectorEX1 = RegEnable(io.outerRF.data, io.cmt.flush || !(div.io.busy || streamBusy))
+    for (operand <- 0 until 2) {
+        io.outerRF(operand).fifo := instPkgRF.sinfo.fifoId(operand)
+        io.outerRF(operand).index := instPkgRF.iterCnt(operand)
+    }
+    val vectorEX1 = RegEnable(VecInit(io.outerRF.map(_.data)), io.cmt.flush || !(div.io.busy || streamBusy))
+    val vectorEX3 = ShiftRegister(vectorEX1, 2, VecInit.fill(2)(VecInit.fill(8)(0.U(32.W))),
+        io.cmt.flush || !(div.io.busy || streamBusy))
     instPkgRF.src1  := Mux(instPkgRF.needStreamSrc, io.serf.rdata1 ,io.rf.rd.prjData)
     instPkgRF.src2  := Mux(instPkgRF.needStreamSrc, io.serf.rdata2 ,io.rf.rd.prkData)
     instPkgRF.cycles.exe := cycleReg  // for profiling
@@ -111,15 +115,18 @@ class MulDivPipeline extends Module {
     mul.io.op      := instPkgEX1.op(3, 0)
     mul.io.divBusy := div.io.busy || streamBusy
     for (lane <- 0 until 8) {
+        val vectorMultiply = instPkgEX1.isCalStream && (instPkgEX1.sinfo.op === VOMAC8 ||
+            instPkgEX1.sinfo.op === VMUL8 || instPkgEX1.sinfo.op === VDOT8)
+        val vectorA = Mux(instPkgEX1.sinfo.op === VOMAC8, vectorEX1(0)(0), vectorEX1(0)(lane))
         if (lane == 0) {
-            when(instPkgEX1.isCalStream && instPkgEX1.sinfo.op === VOMAC8) {
-                mul.io.src1 := instPkgEX1.src1
-                mul.io.src2 := vectorEX1(0)
+            when(vectorMultiply) {
+                mul.io.src1 := vectorA
+                mul.io.src2 := vectorEX1(1)(0)
                 mul.io.op := 0.U
             }
         } else {
-            outerMul(lane).io.src1 := instPkgEX1.src1
-            outerMul(lane).io.src2 := vectorEX1(lane)
+            outerMul(lane).io.src1 := vectorA
+            outerMul(lane).io.src2 := vectorEX1(1)(lane)
             outerMul(lane).io.op := 0.U // low 32 bits: signed/unsigned products agree
             outerMul(lane).io.divBusy := div.io.busy || streamBusy
         }
@@ -164,13 +171,15 @@ class MulDivPipeline extends Module {
     val instPkgEX3ForWakeup = WireDefault(instPkgEX3)
     instPkgEX3ForWakeup.prd := Mux(div.io.busy || streamBusy, 0.U, instPkgEX3.prd)
     io.wk.wakeEX3 := (new WakeupBusPkg)(instPkgEX3ForWakeup, 0.U.asTypeOf(new ReplayBusPkg))
-    instPkgEX3.rfWdata := Mux(instPkgEX3.op(2), div.io.res, mul.io.res)
+    instPkgEX3.rfWdata := Mux(instPkgEX3.isCalStream && instPkgEX3.sinfo.op === VDOT8,
+        outerRegs.io.dot, Mux(instPkgEX3.op(2), div.io.res, mul.io.res))
     instPkgEX3.cycles.wb := cycleReg
     outerRegs.io.execute := 0.U.asTypeOf(new StreamOuterEvent)
-    outerRegs.io.execute.valid := instPkgEX3.valid && instPkgEX3.isCalStream && StreamOuter.isOp(instPkgEX3.sinfo.op) &&
+    outerRegs.io.execute.valid := instPkgEX3.valid && instPkgEX3.isCalStream && StreamOuter.isVector(instPkgEX3.sinfo.op) &&
         !(io.cmt.flush || div.io.busy || streamBusy)
     outerRegs.io.execute.info := instPkgEX3.sinfo
     outerRegs.io.execute.data := VecInit(outerMul.map(_.io.res))
+    outerRegs.io.operands := vectorEX3
     val outerWB = RegNext(outerRegs.io.result, VecInit.fill(8)(0.U(32.W)))
     /* Write Back Stage */
     val instPkgWB = WireDefault(ShiftRegister(
@@ -198,7 +207,7 @@ class MulDivPipeline extends Module {
     io.dbg.srt2 := div.io.dbg 
 
     //不写buffer也要valid，为了change flag
-    io.sewb.wvalid  := instPkgWB.isCalStream && !StreamOuter.isOp(instPkgWB.sinfo.op)
+    io.sewb.wvalid  := instPkgWB.isCalStream && !StreamOuter.isVector(instPkgWB.sinfo.op)
     io.sewb.useBuffer := instPkgWB.sinfo.useBuffer
     io.sewb.iterCnt := instPkgWB.iterCnt
     io.sewb.fifoId := instPkgWB.sinfo.fifoId
