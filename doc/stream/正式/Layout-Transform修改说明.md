@@ -1,5 +1,12 @@
 # Layout Transform 修改说明
 
+## 功能摘要
+
+32 x 32 转置共读取 32 条 128B 源 line，并向 32 条目标 cache line 写入 1024 个
+word。理论上主要访存事件是 `32` 次 STREAM AXI load 和目标冷 cache 下 `32` 次
+write-allocate；逐 word 的 L2 hit write 不产生额外 AXI burst。最终 profile 与此
+一致，目标地址对齐后没有出现第 33 条 cache line。
+
 ## 1. 目标与当前方案
 
 本次修改为 Stream Engine 增加一个最小可运行的 layout transform 通路，当前用
@@ -396,7 +403,7 @@ cd ~/Zircon-2024-main/ZirconSim
 bash profile.sh stream-transpose
 ```
 
-服务器上的 `profile.sh` 是便捷包装脚本，目前不属于仓库跟踪文件。其他环境没有
+服务器上的 `profile.sh` 是已纳入 ZirconSim 仓库的便捷包装脚本。其他环境没有
 该脚本时，可直接执行完全等价的四条命令：
 
 ```bash
