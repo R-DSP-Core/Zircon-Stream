@@ -34,12 +34,14 @@ class IQEntry(num: Int) extends Bundle {
     // for load, stBefore is the number of load instructions in the queue
     // for store, stBefore is the number of instructions in the queue
     val stBefore   = UInt((log2Ceil(num)+1).W)
+    val orderTag = UInt((log2Ceil(nrob)+1).W)
 
     def apply(item: BackendPackage, stBefore: UInt): IQEntry = {
         val e = Wire(new IQEntry(num))
         e.instExi  := true.B
         e.item     := item
         e.stBefore := stBefore
+        e.orderTag := 0.U
         e
     }
 
@@ -114,7 +116,7 @@ class IssueQueueIO(ew: Int, dw: Int, num: Int) extends Bundle {
     val se      = Vec(num, Flipped(new SEISSIO))
 }
 
-class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Module {
+class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false, ordered: Boolean = false) extends Module {
     val io = IO(new IssueQueueIO(ew, dw, num))
 
     // assert(ew >= dw, "enq width must be greater than or equal to deq width")
@@ -123,6 +125,11 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
 
     val len = num / dw
     val n = dw
+    require(!ordered || dw == 1, "ordered issue currently has one output")
+    val orderTail = RegInit(0.U((log2Ceil(nrob)+1).W))
+    if (ordered) {
+        orderTail := Mux(io.flush, 0.U, orderTail + PopCount(io.enq.map(_.fire)))
+    }
 
     val iq = RegInit(
         VecInit.fill(n)(VecInit.fill(len)(0.U.asTypeOf(new IQEntry(num))))
@@ -133,6 +140,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
         io.se(i).usePPBuffer := false.B
         io.se(i).iterCnt := VecInit.fill(3)(0.U(32.W))
         io.se(i).fifoId := VecInit.fill(3)(0.U(streamBits.W))
+        io.se(i).words := VecInit.fill(3)(1.U(4.W))
     }
 
     val fList = Module(new ClusterIndexFIFO(
@@ -180,6 +188,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             io.se(flatIdx).usePPBuffer := e.item.sinfo.usePPBuffer.asUInt.orR
             io.se(flatIdx).iterCnt := e.item.iterCnt
             io.se(flatIdx).fifoId := e.item.sinfo.fifoId
+            io.se(flatIdx).words := e.item.sinfo.words
             e := e.stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem, VecInit(io.se.map(_.ready)), flatIdx.U)
         }
     } 
@@ -192,11 +201,15 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             io.se(flatIdx).usePPBuffer := io.enq(i).bits.sinfo.usePPBuffer.asUInt.orR
             io.se(flatIdx).iterCnt := io.enq(i).bits.iterCnt
             io.se(flatIdx).fifoId := io.enq(i).bits.sinfo.fifoId
+            io.se(flatIdx).words := io.enq(i).bits.sinfo.words
             iq(freeIQ(i))(freeItem(i)) := (new IQEntry(len))(
                 enqEntries(i), 
                 if(isMem) Mux(enqEntries(i).op(6), memLeftNext(i), stLeftNext(i)) 
                 else 0.U
             ).stateUpdate(io.wakeBus, io.rplyBus, io.deq, isMem, VecInit(io.se.map(_.ready)), flatIdx)
+            if (ordered) {
+                iq(freeIQ(i))(freeItem(i)).orderTag := orderTail + PopCount(io.enq.take(i).map(_.fire))
+            }
         }
     }
 
@@ -205,8 +218,16 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
     fList.io.enq.foreach(_.bits := DontCare)
     for(i <- 0 until dw){
         // get the oldest valid existing instruction
-        val issueValid = iq(i).map{ case (e) => e.item.prAllWk && e.instExi }
-        val issueAge   = iq(i).map{ case (e) => e.item.robIdx.getAge }
+        val issueReady = iq(i).zipWithIndex.map { case (e, j) =>
+            e.item.prAllWk && (!e.item.needStreamSrc || io.se(i * len + j).ready)
+        }
+        // Accumulator operations must not bypass an older waiting MAC/clear.
+        val issueValid = iq(i).zipWithIndex.map { case (e, j) => e.instExi && (if (ordered) true.B else issueReady(j)) }
+        // ROB banks keep independent offsets across a flush. Those physical
+        // addresses need not sort in program order, so ordered MDU issue uses
+        // its own enqueue sequence. The ROB bounds the distance between live
+        // tags, including issued entries temporarily retained for load replay.
+        val issueAge   = iq(i).map{ case (e) => if (ordered) e.orderTag else e.item.robIdx.getAge }
         val selectItem = VecInit.tabulate(len)(j => SelectItem(
             idxOH = (1 << j).U(len.W),
             vld = issueValid(j),
@@ -217,8 +238,24 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
             Mux(selectA, a, b)
         })
         
-        io.deq(i).valid := selectItem.vld
-        io.deq(i).bits := Mux(selectItem.vld, selectItem.e, 0.U.asTypeOf(new BackendPackage))
+        val selectedReady = Mux1H(selectItem.idxOH, issueReady)
+        io.deq(i).valid := selectItem.vld && selectedReady && !io.flush
+        io.deq(i).bits := Mux(io.deq(i).valid, selectItem.e, 0.U.asTypeOf(new BackendPackage))
+        if (ordered && sys.env.get("STREAM_OUTER_DEBUG").contains("1")) {
+            val stallCycles = RegInit(0.U(10.W))
+            stallCycles := Mux(selectItem.vld && !selectedReady, stallCycles + 1.U, 0.U)
+            when(io.deq(i).fire && selectItem.e.isCalStream) {
+                printf(p"MDU issue pc=0x${Hexadecimal(selectItem.e.pc)} age=${selectItem.age} op=${selectItem.e.sinfo.op} idx=${selectItem.e.iterCnt}\n")
+            }
+            when(stallCycles === 63.U) {
+                printf(p"MDU stall pc=0x${Hexadecimal(selectItem.e.pc)} age=${selectItem.age} prj=${selectItem.e.prj} prk=${selectItem.e.prk} jwk=${selectItem.e.prjWk} kwk=${selectItem.e.prkWk} lpv=${selectItem.e.prjLpv}/${selectItem.e.prkLpv}\n")
+            }
+            for (port <- io.enq) {
+                when(port.fire && port.bits.isCalStream) {
+                    printf(p"MDU enq pc=0x${Hexadecimal(port.bits.pc)} age=${port.bits.robIdx.getAge} op=${port.bits.sinfo.op}\n")
+                }
+            }
+        }
         // caculate if the selected instruction is the latest, just for load instructions
         if(isMem){
             val loadInQueue = iq(i).map{ case (e) => e.instExi }
@@ -236,7 +273,7 @@ class IssueQueue(ew: Int, dw: Int, num: Int, isMem: Boolean = false) extends Mod
 
         // make the selected instruction not exist
         iq(i).zipWithIndex.foreach{ case (e, j) =>
-            when(selectItem.idxOH(j) && io.deq(i).ready){ 
+            when(selectItem.idxOH(j) && io.deq(i).fire){
                 e.instExi := false.B 
                 // e.item.prjWk := false.B
                 // e.item.prkWk := false.B

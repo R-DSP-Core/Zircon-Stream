@@ -46,8 +46,10 @@ class PreDecoder extends Module {
     // cfg_reuse_empty is encoded as CFGREUSE with funct7=1 and uses x0/x0,
     // so only the normal cfg_reuse(funct7=0) reads rj/rk operands.
     val cfgReuseHasOperands = streamOp === CFGREUSE && streamFunct7 === 0.U
-    val stRkVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || cfgReuseHasOperands || streamOp === CALRJRKSTREAMPP )
-    val stRjVld = isStream && (streamOp === CFGI  || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || cfgReuseHasOperands || streamOp === CALRJRKSTREAMPP )
+    // funct3=6 also contains immediate-ID vector operations, not GPR reads.
+    val rrsHasOperands = streamOp === CALRJRKSTREAMPP && streamFunct7 === 0.U
+    val stRkVld = isStream && (streamOp === CFGI || streamOp === CFGLOAD || streamOp === CFGSTORE || streamOp === CFGSTRIDE || cfgReuseHasOperands || rrsHasOperands)
+    val stRjVld = stRkVld
 
     // rd
     val rdVld = (inst(3, 0) === 0x3.U && !(
@@ -60,12 +62,12 @@ class PreDecoder extends Module {
     io.rinfo.rd := Mux(rdVld, rd, 0.U)
 
     // rj
-    val rjVld = (
+    val rjVld = Mux(isStream, stRjVld, (
         inst(2, 0) === 0x3.U && !(inst(6, 3) === 0xe.U && inst(14)) ||
         inst(6, 0) === 0x67.U || // jalr
         inst(3, 0) === 0xf.U  || 
         stRjVld
-    )
+    ))
 
     val rj = inst(19, 15)
     io.rinfo.rjVld := Mux(rj === 0.U, false.B, rjVld)

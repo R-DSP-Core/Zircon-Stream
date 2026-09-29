@@ -140,11 +140,16 @@ class Frontend extends Module {
     /* Decode and Rename Stage */
     val instPkgDCD = WireDefault(VecInit(fq.io.deq.map(_.bits)))
     val instPkgDSPIn = WireDefault(instPkgDCD)
-    instPkgDSPIn.zip(fq.io.deq).foreach{ case (pkg, deq) => pkg.valid := deq.valid }
-    rnm.io.fte.rinfo.zip(fq.io.deq).foreach{ case (rinfo, deq) => 
+    // Never pair a memory fence with another instruction: dispatch can then
+    // wait for the ROB and pending stores before allowing younger work through.
+    val fenceMask = VecInit.tabulate(ndcd) { i =>
+      if (i == 0) true.B else !(0 to i).map(j => StreamOuter.isFence(fq.io.deq(j).bits.inst)).reduce(_ || _)
+    }
+    instPkgDSPIn.zipWithIndex.foreach{ case (pkg, i) => pkg.valid := fq.io.deq(i).valid && fenceMask(i) }
+    rnm.io.fte.rinfo.zip(fq.io.deq).zipWithIndex.foreach{ case ((rinfo, deq), i) =>
         rinfo.bits  := deq.bits.rinfo 
-        rinfo.valid := deq.valid && io.dsp.instPkg(0).ready
-        deq.ready   := rinfo.ready && io.dsp.instPkg(0).ready
+        rinfo.valid := deq.valid && io.dsp.instPkg(0).ready && fenceMask(i)
+        deq.ready   := rinfo.ready && io.dsp.instPkg(0).ready && fenceMask(i)
     }
     rnm.io.cmt <> io.cmt.rnm
 

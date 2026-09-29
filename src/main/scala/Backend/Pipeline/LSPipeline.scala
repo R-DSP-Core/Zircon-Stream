@@ -40,6 +40,7 @@ class LSSEIO extends Bundle {
 }
 
 class LSPipelineIO extends Bundle {
+    val storesDrained = Output(Bool())
     val iq  = new LSIQIO
     val rf  = Flipped(new RegfileSingleIO)
     val tcmwr = Flipped(new RegfileWRIO)
@@ -61,6 +62,7 @@ class LSPipeline extends Module {
 
     //TCM
     val dtcm = Module(new DTCMBurst)
+    io.storesDrained := dc.io.storesDrained && dtcm.io.storesDrained
     io.tcm <> dtcm.io.mem
 
     io.dcProfiling := dc.io.profiling

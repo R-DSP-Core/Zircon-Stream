@@ -31,6 +31,7 @@ class ROBEntry extends Bundle{
     val pc       = UInt(32.W)
     val isBranch = Bool()
     val isStore  = Bool()
+    val isFence  = Bool()
 
     val complete = Bool()
     val nxtCmtEn = Bool()
@@ -38,6 +39,7 @@ class ROBEntry extends Bundle{
     val sinfo = new StreamInfo()
     val itercnt = Vec(3,UInt(32.W))
     val sWdata = UInt(32.W)
+    val outerData = Vec(8, UInt(32.W))
     
     def apply(pkg: FrontendPackage): ROBEntry = {
         val entry = WireDefault(0.U.asTypeOf(new ROBEntry))
@@ -48,6 +50,7 @@ class ROBEntry extends Bundle{
         entry.pc       := pkg.pc
         entry.isBranch := pkg.op(4)
         entry.isStore  := pkg.op(6) && pkg.func(2)
+        entry.isFence  := StreamOuter.isFence(pkg.inst)
         entry.cycle    := pkg.cycles
         entry.sinfo    := pkg.sinfo
         entry
@@ -71,6 +74,7 @@ class ROBEntry extends Bundle{
         this.pc       := bits.pc
         this.isBranch := bits.isBranch
         this.isStore  := bits.isStore
+        this.isFence  := bits.isFence
         this.cycle    := bits.cycle
         this.sinfo    := bits.sinfo
         this.complete := false.B
@@ -82,6 +86,7 @@ class ROBEntry extends Bundle{
         this.nxtCmtEn := bits.nxtCmtEn
         this.itercnt := bits.itercnt
         this.sWdata := bits.sWdata
+        this.outerData := bits.outerData
     }
 }
 
@@ -90,6 +95,7 @@ class ROBDebugIO extends Bundle {
 }
 
 class ROBDispatchIO extends Bundle{
+    val empty = Output(Bool())
     val enq    = Vec(ndcd, Flipped(Decoupled(new ROBEntry)))
     val enqIdx = Output(Vec(ndcd, new ClusterEntry(wrobQ, wdecode)))
 }
@@ -110,6 +116,7 @@ class ReorderBuffer extends Module{
     val io = IO(new ReorderBufferIO)
 
     val q = Module(new ClusterIndexFIFO(new ROBEntry, nrob, ndcd, ncommit, arithNissue, nisplus))
+    io.dsp.empty := !q.io.deq(0).valid
     // 1. frontend: in dispatch stage, each instruction will enqueue into the ROB
     q.io.enq.zip(io.dsp.enq).foreach{case (enq, dsp) => enq <> dsp }
     io.dsp.enqIdx.zip(q.io.enqIdx).foreach{ case(idx, enq) =>

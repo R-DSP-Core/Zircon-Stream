@@ -11,6 +11,8 @@ class StreamInfo extends Bundle{
     val useBuffer = Output(Vec(3,Bool()))
     val usePPBuffer = Output(Vec(2,Bool()))
     val fifoId = Output(Vec(3, UInt(streamBits.W)))
+    val words = Output(Vec(3, UInt(4.W)))
+    val bank = Output(UInt(3.W))
 }
 
 class DecoderIO extends Bundle{
@@ -77,28 +79,41 @@ class Decoder extends Module{
         ))
     }.elsewhen(funct3 === 0x4.U){ //CFGREUSE
         io.sinfo.op := Mux(funct7 === 0x1.U, CFGREUSEEMPTY, CFGREUSE)
+    }.elsewhen(funct3 === 0x6.U) {
+        io.sinfo.op := MuxCase(CALRJRKSTREAMPP, Seq(
+            (funct7 === 0x40.U) -> VOMAC8,
+            (funct7 === 0x41.U) -> VCLR,
+            (funct7 === 0x42.U) -> VREGOUT8
+        ))
     }
     io.sinfo.state(DONECFG) := isStream
     io.sinfo.state(LDSTRAEM) := io.sinfo.op === CFGLOAD
     io.sinfo.state(LDAXISTREAM) := io.sinfo.op === CFGLOAD && funct7 === 0x1.U
-    val isCalStream  = isStream && (io.sinfo.op === CALSTREAM || io.sinfo.op === CALSTREAMRD || io.sinfo.op === CALSTREAMPP || io.sinfo.op === CALRJRKSTREAMPP)  
+    val isOuter = isStream && StreamOuter.isOp(io.sinfo.op)
+    val isCalStream  = isStream && (io.sinfo.op === CALSTREAM || io.sinfo.op === CALSTREAMRD || io.sinfo.op === CALSTREAMPP || io.sinfo.op === CALRJRKSTREAMPP || isOuter)
     val isCalStreamRJRK = isStream && io.sinfo.op === CALRJRKSTREAMPP
     val isCalStreamRD = isStream && io.sinfo.op === CALSTREAMRD
     val isCalStreamNRD = isCalStream && !isCalStreamRD
     val isCfgStream  = isStream && !isCalStream
     for (i <- 0 until 2) { //rs1 rs2
-        io.sinfo.useBuffer(i) := isCalStream && !isCalStreamRJRK
+        io.sinfo.useBuffer(i) := isCalStream && !isCalStreamRJRK && (!isOuter || io.sinfo.op === VOMAC8)
     }       
     io.isCalStream := isCalStream
     io.needStreamSrc := isCalStream && (io.sinfo.op =/= CALRJRKSTREAMPP)
     io.sinfo.useBuffer(2)   := isStream && io.sinfo.op === CALSTREAM // RD写通用寄存器，另外两条指令写PPbuffer
     io.sinfo.usePPBuffer(Even) := isStream && io.sinfo.op === CALSTREAMPP
     io.sinfo.usePPBuffer(Odd) := isStream && io.sinfo.op === CALRJRKSTREAMPP
+    when(isOuter) {
+        io.sinfo.useBuffer(2) := io.sinfo.op === VREGOUT8
+    }
+    io.sinfo.words := VecInit(1.U(4.W), Mux(io.sinfo.op === VOMAC8, 8.U(4.W), 1.U(4.W)),
+        Mux(io.sinfo.op === VREGOUT8, 8.U(4.W), 1.U(4.W)))
+    io.sinfo.bank := Mux(io.sinfo.op === VREGOUT8, inst(17, 15), inst(9, 7))
     for (i <- 0 until 3) {
         io.sinfo.fifoId(i) := Mux(io.sinfo.useBuffer(i), encodedFifoId(i), 0.U)
     }
     val isStreamMul = isCalStream && !isCalStreamRJRK && io.sinfo.op =/= CALSTREAMPP && funct7 === 16.U
-    val isStreamAlu = isCalStream && !isStreamMul
+    val isStreamAlu = isCalStream && !isStreamMul && !isOuter
     val isStreamMdu = isStream && !isStreamAlu
 
     /* op: 

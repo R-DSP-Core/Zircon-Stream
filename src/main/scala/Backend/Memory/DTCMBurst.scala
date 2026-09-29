@@ -62,6 +62,7 @@ class TbCommitIO extends Bundle {
 }
 
 class TcmBurstIO extends Bundle {
+    val storesDrained = Output(Bool())
     val pp  = new TbPipelineIO
     val cmt = new TbCommitIO
     val mem = new TbMemIO
@@ -117,6 +118,7 @@ class DTCMBurst extends Module {
     sb.io.enq.bits  := sbEnq
     sb.io.stCmt     := io.cmt.stCmt
     sb.io.flush     := io.cmt.flush
+    io.storesDrained := sb.io.clear && !sb.io.enq.valid && !io.cmt.stCmt
     sb.io.lock      := false.B
     io.pp.sbFull    := sbFull
 

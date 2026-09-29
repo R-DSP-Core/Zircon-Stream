@@ -67,7 +67,10 @@ object EXEOp {
     val REMU    = 0x7.U(4.W)
 
     // stream
-    val stInstBits = 4
+    val stInstBits = 5
+    val VOMAC8 = 0x10.U(stInstBits.W)
+    val VCLR = 0x11.U(stInstBits.W)
+    val VREGOUT8 = 0x12.U(stInstBits.W)
     val streamCfgBits = 3
     val CFGSTORE = 0x1.U(stInstBits.W)
     val CFGLOAD = 0x5.U(stInstBits.W)

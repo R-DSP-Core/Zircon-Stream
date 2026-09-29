@@ -13,6 +13,7 @@ class BackendDispatchIO extends Bundle {
     val instPkg = Vec(niq, Vec(ndcd, Flipped(Decoupled(new BackendPackage))))
     val wakeBus = Output(Vec(nis, new WakeupBusPkg))
     val rplyBus = Output(new ReplayBusPkg)
+    val storesDrained = Output(Bool())
 }
 
 class BackendROBIO extends Bundle {
@@ -33,9 +34,13 @@ class BackendBDBIO extends Bundle {
 class CommitStreamIO extends Bundle{
     val flush       = Input(Bool())
     val fireStreamOp = Input(Vec(streamNum,Vec(ncommit,Bool())))
+    val stepStreamOp = Input(Vec(streamNum, Vec(ncommit, UInt(4.W))))
+    val readWords = Input(Vec(streamNum, Vec(ncommit, UInt(4.W))))
     val fireStreamRead = Input(Vec(streamNum,Vec(ncommit,Bool())))
     val streamReadIterCnt = Input(Vec(streamNum, Vec(ncommit, UInt(32.W))))
     val fireComputeWrite = Input(Vec(computeStreamNum, Vec(ncommit, Bool())))
+    val stepComputeWrite = Input(Vec(computeStreamNum, Vec(ncommit, UInt(4.W))))
+    val outer = Input(Vec(ncommit, new StreamOuterEvent))
     val computeWriteIterCnt = Input(Vec(computeStreamNum, Vec(ncommit, UInt(32.W))))
     val fireStreamOpPP = Input(Vec(2,Vec(ncommit,Bool())))
     val iterCnt = Input(Vec(3,Vec(ncommit,UInt(32.W))))
@@ -78,7 +83,7 @@ class Backend extends Module {
     val io   = IO(new BackendIO)
     
     val arIQ = Module(new IssueQueue(ndcd, arithNissue, arithNiq, false))
-    val mdIQ = Module(new IssueQueue(ndcd, muldivNissue, muldivNiq, false))
+    val mdIQ = Module(new IssueQueue(ndcd, muldivNissue, muldivNiq, false, ordered = true))
     val lsIQ = Module(new IssueQueue(ndcd, lsuNissue, lsuNiq, true))
 
     val rf   = Module(new Regfile)
@@ -201,6 +206,10 @@ class Backend extends Module {
 
     //stream engine
     val stream = Module(new StreamEngine)
+    io.dsp.storesDrained := lsPP.io.storesDrained && stream.io.storesDrained
+    mdPP.io.outerRF <> stream.io.outerRF
+    stream.io.outerReserve := mdPP.io.outerReserve
+    mdPP.io.outerCommit := io.cmt.stream.outer
     io.seRIter <> stream.io.rdIter //dispatch
     for (i <- 0 until arithNiq){
         arIQ.io.se(i)  <> stream.io.iss(i)

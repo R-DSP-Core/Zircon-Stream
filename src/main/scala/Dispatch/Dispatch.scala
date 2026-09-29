@@ -13,8 +13,10 @@ import ZirconUtil._
 // 把正确的 iter值带着，进入IQ
 class SERdIterIO extends Bundle{
     val fireStreamOp = Output(Vec(streamNum,Vec(ndcd,Bool())))
+    val stepStreamOp = Output(Vec(streamNum, Vec(ndcd, UInt(4.W))))
     val iterCnt =       Input(Vec(streamNum,Vec(ndcd,UInt(32.W))))
     val fireComputeWrite = Output(Vec(computeStreamNum, Vec(ndcd, Bool())))
+    val stepComputeWrite = Output(Vec(computeStreamNum, Vec(ndcd, UInt(4.W))))
     val computeWriteIterCnt = Input(Vec(computeStreamNum, Vec(ndcd, UInt(32.W))))
     val fireStreamOpPP = Output(Vec(2,Vec(ndcd,Bool())))
     val iterCntPP =       Input(Vec(2,Vec(ndcd,UInt(32.W))))
@@ -55,9 +57,11 @@ class Dispatch extends Module {
                      useBuffer(1) && fifoId(1) === b.U
           val normalWrite = useBuffer(2) && !computeDst && fifoId(2) === b.U
           io.seRIter.fireStreamOp(b)(i) := fireStream && (read || normalWrite)
+          io.seRIter.stepStreamOp(b)(i) := Mux(read, StreamOuter.readWords(instBits.sinfo, b.U), instBits.sinfo.words(2))
         }
         for (b <- 0 until computeStreamNum) {
           io.seRIter.fireComputeWrite(b)(i) := fireStream && useBuffer(2) && fifoId(2) === (ComputeX + b).U
+          io.seRIter.stepComputeWrite(b)(i) := instBits.sinfo.words(2)
         }
         for (k <- 0 until 2) {
           io.seRIter.fireStreamOpPP(k)(i) := fireStream && usePPBuffer(k)
@@ -65,10 +69,10 @@ class Dispatch extends Module {
     }     
     
     val streamIter = VecInit.tabulate(streamNum) { b =>
-      genIter(io.seRIter.fireStreamOp(b), io.seRIter.iterCnt(b))
+      io.seRIter.iterCnt(b)
     }
     val computeWriteIter = VecInit.tabulate(computeStreamNum) { b =>
-      genIter(io.seRIter.fireComputeWrite(b), io.seRIter.computeWriteIterCnt(b))
+      io.seRIter.computeWriteIterCnt(b)
     }
     val seIter = WireInit(VecInit.fill(3)(VecInit.fill(ndcd)(0.U(32.W))))
     for (i <- 0 until ndcd) {
@@ -102,22 +106,30 @@ class Dispatch extends Module {
         (new BackendPackage)(io.fte.instPkg(i).bits, io.cmt.rob.enqIdx(i), io.cmt.bdb.enqIdx(i), rboard.io.prjInfo(i), rboard.io.prkInfo(i), iter)
     }
 
+    // FENCE is dispatched alone by the frontend. It orders CPU pack stores,
+    // stream configuration, and completed FIFO2 exports without software delays.
+    val fencePending = RegInit(false.B)
+    val isFence = StreamOuter.isFence(io.fte.instPkg(0).bits.inst)
+    val allow = !fencePending && (!isFence || (io.cmt.robEmpty && io.bke.storesDrained)) && !io.cmt.flush
+    when(io.cmt.rob.enq(0).fire && isFence) { fencePending := true.B }
+    when(io.cmt.fenceRetired || io.cmt.flush) { fencePending := false.B }
+
     // dispatcher
     dsp.io.ftePkg.zipWithIndex.foreach{ case (d, i) =>
-        d.valid := io.fte.instPkg(i).valid && io.cmt.rob.enq(0).ready && io.cmt.bdb.enq(0).ready
+        d.valid := io.fte.instPkg(i).valid && io.cmt.rob.enq(0).ready && io.cmt.bdb.enq(0).ready && allow
         d.bits  := ftePkg(i)
-        io.fte.instPkg(i).ready := d.ready && io.cmt.rob.enq(0).ready && io.cmt.bdb.enq(0).ready
+        io.fte.instPkg(i).ready := d.ready && io.cmt.rob.enq(0).ready && io.cmt.bdb.enq(0).ready && allow
     }
     dsp.io.func.zipWithIndex.foreach{ case (func, i) =>
         func := io.fte.instPkg(i).bits.func
     }
     dsp.io.bkePkg <> io.bke.instPkg
     io.cmt.rob.enq.zipWithIndex.foreach{ case (enq, i) =>
-        enq.valid := io.fte.instPkg(i).valid && dsp.io.ftePkg(i).ready
+        enq.valid := io.fte.instPkg(i).valid && dsp.io.ftePkg(i).ready && io.cmt.bdb.enq(0).ready && allow
         enq.bits  := (new ROBEntry)(io.fte.instPkg(i).bits)
     }
     io.cmt.bdb.enq.zipWithIndex.foreach{ case (enq, i) =>
-        enq.valid := io.fte.instPkg(i).valid && dsp.io.ftePkg(i).ready && io.fte.instPkg(i).bits.op(4)
+        enq.valid := io.fte.instPkg(i).valid && dsp.io.ftePkg(i).ready && io.cmt.rob.enq(0).ready && allow && io.fte.instPkg(i).bits.op(4)
         enq.bits  := (new BDBEntry)(io.fte.instPkg(i).bits)
     }
 }

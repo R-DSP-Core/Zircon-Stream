@@ -20,6 +20,8 @@ class CommitDispatchIO extends Bundle {
     val rob   = new ROBDispatchIO
     val bdb   = new BDBDispatchIO
     val flush = Output(Bool())
+    val robEmpty = Output(Bool())
+    val fenceRetired = Output(Bool())
 }
 
 class CommitIO extends Bundle {
@@ -58,6 +60,9 @@ class Commit extends Module {
         io.dsp.rob.enq(i).ready := rob.io.dsp.enq(0).ready
     }
     io.dsp.rob.enqIdx := rob.io.dsp.enqIdx
+    io.dsp.rob.empty := rob.io.dsp.empty
+    io.dsp.robEmpty := rob.io.dsp.empty
+    io.dsp.fenceRetired := rob.io.cmt.deq.map(d => d.valid && d.bits.isFence).reduce(_ || _)
 
     // backend
     bdb.io.bke <> io.bke.bdb
@@ -138,19 +143,26 @@ class Commit extends Module {
         val usePPBuffer = instBits.sinfo.usePPBuffer
         val fifoId = instBits.sinfo.fifoId
         val sop = instBits.sinfo.op
-        val fireStream = (sop === CALSTREAMRD || sop === CALRJRKSTREAMPP || sop === CALSTREAM || sop === CALSTREAMPP) && rob.io.cmt.deq(i).valid
+        val fireStream = (sop === CALSTREAMRD || sop === CALRJRKSTREAMPP || sop === CALSTREAM || sop === CALSTREAMPP || StreamOuter.isOp(sop)) && instBits.sinfo.state(DONECFG) && rob.io.cmt.deq(i).valid
+        io.bke.stream.outer(i).valid := rob.io.cmt.deq(i).valid && instBits.sinfo.state(DONECFG) && StreamOuter.isOp(sop)
+        io.bke.stream.outer(i).info := instBits.sinfo
+        io.bke.stream.outer(i).index := instBits.itercnt
+        io.bke.stream.outer(i).data := instBits.outerData
         val computeDst = fifoId(2) === ComputeX.U || fifoId(2) === ComputeY.U
         for (b <- 0 until streamNum) {
           val read = useBuffer(0) && fifoId(0) === b.U ||
                      useBuffer(1) && fifoId(1) === b.U
           val normalWrite = useBuffer(2) && !computeDst && fifoId(2) === b.U
           io.bke.stream.fireStreamOp(b)(i) := fireStream && (read || normalWrite)
+          io.bke.stream.stepStreamOp(b)(i) := Mux(read, StreamOuter.readWords(instBits.sinfo, b.U), instBits.sinfo.words(2))
+          io.bke.stream.readWords(b)(i) := StreamOuter.readWords(instBits.sinfo, b.U)
           io.bke.stream.fireStreamRead(b)(i) := fireStream && read
           io.bke.stream.streamReadIterCnt(b)(i) := Mux(useBuffer(0) && fifoId(0) === b.U,
                                                        instBits.itercnt(0), instBits.itercnt(1))
         }
         for (b <- 0 until computeStreamNum) {
           io.bke.stream.fireComputeWrite(b)(i) := fireStream && useBuffer(2) && fifoId(2) === (ComputeX + b).U
+          io.bke.stream.stepComputeWrite(b)(i) := instBits.sinfo.words(2)
           io.bke.stream.computeWriteIterCnt(b)(i) := instBits.itercnt(2)
         }
         for (b <- 0 until 3) {

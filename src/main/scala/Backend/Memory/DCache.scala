@@ -123,6 +123,7 @@ class DCacheProfilingDBG extends Bundle {
 }
 
 class DCacheIO extends Bundle {
+    val storesDrained = Output(Bool())
     val mmu = new DMMUIO
     val pp  = new DPipelineIO
     val cmt = new DCommitIO
@@ -195,6 +196,7 @@ class DCache extends Module {
     sb.io.stCmt     := io.cmt.stCmt
     sb.io.stFinish  := io.l2.wrsp
     sb.io.flush     := io.cmt.flush
+    io.storesDrained := sb.io.clear && !sb.io.enq.valid && !io.cmt.stCmt
     sb.io.lock      := fsm.io.cc.sbLock
     // fsm
     fsm.io.cc.rreq     := c1s3.rreq
@@ -333,4 +335,3 @@ class DCache extends Module {
     io.profiling    := fsm.io.profiling
     io.profiling.addr := io.l2.paddr
 }
-

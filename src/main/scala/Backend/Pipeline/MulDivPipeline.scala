@@ -3,6 +3,7 @@ import chisel3.util._
 import ZirconConfig.Issue._
 import ZirconConfig.Commit._
 import ZirconConfig.Stream.DONECFG
+import ZirconConfig.EXEOp._
 
 class MulDivROBIO extends PipelineROBIO
 
@@ -40,6 +41,9 @@ class MulDivPipelineIO extends Bundle {
     val streamPP  = Flipped(new SEPipelineIO)
     val serf = Flipped(new SERFIO)
     val sewb = Flipped(new SEWBIO)
+    val outerRF = Flipped(new SEOuterRFIO)
+    val outerReserve = Output(new StreamOuterEvent)
+    val outerCommit = Input(Vec(ncommit, new StreamOuterEvent))
 }
 
 class MulDivPipeline extends Module {
@@ -47,6 +51,12 @@ class MulDivPipeline extends Module {
 
     val mul = Module(new MulBooth2Wallce)
     val div = Module(new SRT2)
+    // Lane zero shares the existing scalar multiplier; the MDU issues one
+    // scalar or vector operation per cycle, never both.
+    val outerMul = Seq(mul) ++ Seq.fill(7)(Module(new MulBooth2Wallce))
+    val outerRegs = Module(new StreamOuterRegisters)
+    outerRegs.io.commit := io.outerCommit
+    outerRegs.io.flush := io.cmt.flush
     val streamBusy = io.streamPP.busy
 
     // cycle stat
@@ -56,6 +66,10 @@ class MulDivPipeline extends Module {
     /* Issue Stage */
     val instPkgIs = WireDefault(io.iq.instPkg.bits)
     io.iq.instPkg.ready := !(div.io.busy || streamBusy)
+    io.outerReserve := 0.U.asTypeOf(new StreamOuterEvent)
+    io.outerReserve.valid := io.iq.instPkg.fire && instPkgIs.isCalStream && StreamOuter.isOp(instPkgIs.sinfo.op) && !io.cmt.flush
+    io.outerReserve.info := instPkgIs.sinfo
+    io.outerReserve.index := instPkgIs.iterCnt
 
     def segFlush(instPkg: BackendPackage): Bool = {
         io.cmt.flush || io.wk.rplyIn.replay && (instPkg.prjLpv | instPkg.prkLpv).orR
@@ -77,6 +91,9 @@ class MulDivPipeline extends Module {
     io.rf.rd.prk    := instPkgRF.prk
     io.serf.iterCnt  := instPkgRF.iterCnt
     io.serf.fifoId   := instPkgRF.sinfo.fifoId
+    io.outerRF.fifo := instPkgRF.sinfo.fifoId(1)
+    io.outerRF.index := instPkgRF.iterCnt(1)
+    val vectorEX1 = RegEnable(io.outerRF.data, io.cmt.flush || !(div.io.busy || streamBusy))
     instPkgRF.src1  := Mux(instPkgRF.needStreamSrc, io.serf.rdata1 ,io.rf.rd.prjData)
     instPkgRF.src2  := Mux(instPkgRF.needStreamSrc, io.serf.rdata2 ,io.rf.rd.prkData)
     instPkgRF.cycles.exe := cycleReg  // for profiling
@@ -93,6 +110,20 @@ class MulDivPipeline extends Module {
     mul.io.src2    := Mux(io.fwd.src2Fwd.valid, io.fwd.src2Fwd.bits, instPkgEX1.src2)
     mul.io.op      := instPkgEX1.op(3, 0)
     mul.io.divBusy := div.io.busy || streamBusy
+    for (lane <- 0 until 8) {
+        if (lane == 0) {
+            when(instPkgEX1.isCalStream && instPkgEX1.sinfo.op === VOMAC8) {
+                mul.io.src1 := instPkgEX1.src1
+                mul.io.src2 := vectorEX1(0)
+                mul.io.op := 0.U
+            }
+        } else {
+            outerMul(lane).io.src1 := instPkgEX1.src1
+            outerMul(lane).io.src2 := vectorEX1(lane)
+            outerMul(lane).io.op := 0.U // low 32 bits: signed/unsigned products agree
+            outerMul(lane).io.divBusy := div.io.busy || streamBusy
+        }
+    }
 
     // divide
     div.io.src1 := Mux(io.fwd.src1Fwd.valid, io.fwd.src1Fwd.bits, instPkgEX1.src1)
@@ -134,7 +165,13 @@ class MulDivPipeline extends Module {
     instPkgEX3ForWakeup.prd := Mux(div.io.busy || streamBusy, 0.U, instPkgEX3.prd)
     io.wk.wakeEX3 := (new WakeupBusPkg)(instPkgEX3ForWakeup, 0.U.asTypeOf(new ReplayBusPkg))
     instPkgEX3.rfWdata := Mux(instPkgEX3.op(2), div.io.res, mul.io.res)
-    instPkgEX3.cycles.wb := cycleReg  
+    instPkgEX3.cycles.wb := cycleReg
+    outerRegs.io.execute := 0.U.asTypeOf(new StreamOuterEvent)
+    outerRegs.io.execute.valid := instPkgEX3.valid && instPkgEX3.isCalStream && StreamOuter.isOp(instPkgEX3.sinfo.op) &&
+        !(io.cmt.flush || div.io.busy || streamBusy)
+    outerRegs.io.execute.info := instPkgEX3.sinfo
+    outerRegs.io.execute.data := VecInit(outerMul.map(_.io.res))
+    val outerWB = RegNext(outerRegs.io.result, VecInit.fill(8)(0.U(32.W)))
     /* Write Back Stage */
     val instPkgWB = WireDefault(ShiftRegister(
         Mux(io.cmt.flush || div.io.busy || streamBusy , 0.U.asTypeOf(new BackendPackage), instPkgEX3), 
@@ -149,6 +186,7 @@ class MulDivPipeline extends Module {
     io.cmt.rob.widx.high   := DontCare
     io.cmt.rob.wen         := instPkgWB.valid
     io.cmt.rob.wdata       := (new ROBEntry)(instPkgWB)
+    io.cmt.rob.wdata.outerData := outerWB
     // regfile
     io.rf.wr.prd       := instPkgWB.prd
     io.rf.wr.prdVld    := instPkgWB.rdVld
@@ -160,7 +198,7 @@ class MulDivPipeline extends Module {
     io.dbg.srt2 := div.io.dbg 
 
     //不写buffer也要valid，为了change flag
-    io.sewb.wvalid  := instPkgWB.isCalStream
+    io.sewb.wvalid  := instPkgWB.isCalStream && !StreamOuter.isOp(instPkgWB.sinfo.op)
     io.sewb.useBuffer := instPkgWB.sinfo.useBuffer
     io.sewb.iterCnt := instPkgWB.iterCnt
     io.sewb.fifoId := instPkgWB.sinfo.fifoId
