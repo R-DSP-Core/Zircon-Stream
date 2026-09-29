@@ -186,6 +186,10 @@ class AXIArbiter extends Module{
     val wIdle :: wDaw :: wDw :: wDb :: wSaw :: wSw :: wSb :: wTaw :: wTw :: wTb :: Nil = Enum(10)
     val wState = RegInit(wIdle)
 
+    // FIFO2 may release each word on W, but a fence must also wait for B.
+    // This arbiter has at most one active write transaction.
+    io.stream.writePending := wState === wSaw || wState === wSw || wState === wSb
+
     // io.l2.foreach{ l2 => l2.wrsp.get := false.B }
     io.l2(1).wrsp.get := false.B
     io.stream.wrsp := false.B

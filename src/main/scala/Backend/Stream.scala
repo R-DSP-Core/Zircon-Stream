@@ -54,6 +54,8 @@ class SEMemIO extends Bundle {
 
     val wreq       = Output(Bool())
     val wrsp       = Input(Bool())
+    // Separate transaction lifetime from the per-word W-channel handshake.
+    val writePending = Input(Bool())
     val wlast      = Output(Bool())
     val waddr      = Output(UInt(32.W))
     val wdata      = Output(UInt(32.W))
@@ -1130,6 +1132,6 @@ class StreamEngine extends Module {
     io.mem.wstrb := 0xf.U
     io.mem.wlast := storeWordCnt.andR
     io.mem.wdata := Fifo(storeFifoId)(storeFifoIdx)
-    io.storesDrained := !storereadyMap(Dst).asUInt.orR && !storeValidReg &&
+    io.storesDrained := !storereadyMap(Dst).asUInt.orR && !storeValidReg && !io.mem.writePending &&
       !storereadyMap(Layout).asUInt.orR && !layoutStoreLineActive && layoutWritesPending === 0.U
 }
