@@ -32,6 +32,11 @@ class ROBEntry extends Bundle{
     val isBranch = Bool()
     val isStore  = Bool()
     val isFence  = Bool()
+    // Effective address written back by the LSU.  Keeping this in the ROB
+    // lets architectural side effects be decoded at retirement instead of
+    // from a speculative request at the cache/AXI boundary.
+    val storeAddr = UInt(32.W)
+    val storeData = UInt(32.W)
 
     val complete = Bool()
     val nxtCmtEn = Bool()
@@ -62,7 +67,13 @@ class ROBEntry extends Bundle{
         entry.cycle    := pkg.cycles
         entry.sinfo    := pkg.sinfo
         entry.itercnt  := pkg.iterCnt
-        entry.sWdata   := pkg.rfWdata //其实也是stream write data
+        // For stores, src2 is the architectural value presented to DCache.
+        // Keep it until retirement so MMIO commands can decode both address
+        // and data without observing a speculative bus transaction.
+        // Stream difftest still reads the execution result from sWdata.
+        entry.sWdata   := pkg.rfWdata
+        entry.storeData := pkg.src2
+        entry.storeAddr := pkg.src1
         entry
     }
     def enqueue(data: Data): Unit = {
@@ -75,6 +86,8 @@ class ROBEntry extends Bundle{
         this.isBranch := bits.isBranch
         this.isStore  := bits.isStore
         this.isFence  := bits.isFence
+        this.storeAddr := bits.storeAddr
+        this.storeData := bits.storeData
         this.cycle    := bits.cycle
         this.sinfo    := bits.sinfo
         this.complete := false.B
@@ -87,6 +100,8 @@ class ROBEntry extends Bundle{
         this.itercnt := bits.itercnt
         this.sWdata := bits.sWdata
         this.outerData := bits.outerData
+        this.storeAddr := bits.storeAddr
+        this.storeData := bits.storeData
     }
 }
 
